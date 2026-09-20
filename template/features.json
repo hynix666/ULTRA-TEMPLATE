@@ -1,0 +1,63 @@
+{
+  "$comment": "Read by template/init.mjs, and deleted with it. A feature's paths are deleted when it is not selected; content inside shared files is selected with marker lines instead. See template/README.md.",
+  "version": "1.0.0",
+  "identity": {
+    "owner": "hynix666",
+    "repo": "ULTRA-TEMPLATE",
+    "name": "ultra-template"
+  },
+  "templateOnly": ["template", ".github/workflows/template-test.yml", ".github/workflows/template-release.yml"],
+  "features": {
+    "go-service": {
+      "summary": "Go HTTP service: Clean Architecture layers, standard library only, import rules enforced by a test",
+      "describes": "a Go task API",
+      "paths": ["services/api-go", ".claude/skills/add-endpoint-go", "scripts/check-contract.mjs", "scripts/contract", "test/check-contract.test.mjs"]
+    },
+    "ts-service": {
+      "summary": "TypeScript HTTP service on Node 24: pure domain core, import boundaries checked on every file",
+      "describes": "a TypeScript task API",
+      "paths": ["services/api-ts", ".claude/skills/add-endpoint-ts", "scripts/check-contract.mjs", "scripts/contract", "test/check-contract.test.mjs"]
+    },
+    "mcp-server": {
+      "summary": "MCP server on the Model Context Protocol SDK: tools over stdio, the same layers, driven in tests by a real client",
+      "describes": "an MCP server that gives an AI assistant the task API's tools",
+      "paths": ["services/mcp-server", ".claude/skills/add-mcp-tool", ".github/workflows/mcp-publish.yml"]
+    },
+    "py-service": {
+      "summary": "Python HTTP service on the standard library: pure domain, WSGI transport, layer rules enforced by an ast-based check",
+      "describes": "a Python task API",
+      "paths": ["services/api-py", ".claude/skills/add-endpoint-py", "scripts/check-contract.mjs", "scripts/contract", "test/check-contract.test.mjs"]
+    },
+    "web": {
+      "summary": "React + Vite app in feature folders, import boundaries checked, component tests",
+      "describes": "a React web app",
+      "paths": ["apps/web"]
+    },
+    "ts-library": {
+      "summary": "TypeScript library for npm: exports map, publint and type checks on the packed tarball, trusted publishing",
+      "describes": "a TypeScript library for npm",
+      "paths": ["packages/ts-library"]
+    },
+    "architecture": {
+      "summary": "LikeC4 architecture-as-code: model rules run as tests, optional GitHub Pages site",
+      "paths": ["architecture", ".github/workflows/architecture.yml"]
+    },
+    "release": {
+      "summary": "release-please: release pull requests, tags and CHANGELOG from Conventional Commits",
+      "paths": [".github/workflows/release.yml", "release-please-config.json", ".release-please-manifest.json"]
+    },
+    "devcontainer": {
+      "summary": "Dev Container carrying the toolchains the selected features need",
+      "paths": [".devcontainer"]
+    }
+  },
+  "presets": {
+    "minimal": [],
+    "go-api": ["go-service", "architecture", "release", "devcontainer"],
+    "py-api": ["py-service", "architecture", "release", "devcontainer"],
+    "fullstack-ts": ["ts-service", "web", "architecture", "release", "devcontainer"],
+    "library": ["ts-library", "release", "devcontainer"],
+    "mcp": ["mcp-server", "release", "devcontainer"],
+    "all": ["go-service", "ts-service", "py-service", "mcp-server", "web", "ts-library", "architecture", "release", "devcontainer"]
+  }
+}

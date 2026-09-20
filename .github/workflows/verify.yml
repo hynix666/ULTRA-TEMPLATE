@@ -1,0 +1,329 @@
+# The one required status check.
+#
+# Every job below feeds the final `verify` job, and branch protection names only that job. A
+# required check is matched by job name, so adding, renaming or removing a module job never means
+# editing protection rules — and never leaves pull requests waiting for a check that no longer runs.
+# A new job must also be listed under `verify.needs`, or it is not part of the gate.
+#
+# Third-party actions are pinned to a commit SHA with the version in a trailing comment. A tag can
+# be repointed at different code with no diff in this repository (tj-actions/changed-files, March
+# 2025); a SHA cannot. Dependabot bumps SHA and comment together, and scripts/check-hygiene.mjs
+# fails the build on an unpinned `uses:`.
+name: verify
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  merge_group:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: verify-${{ github.event.pull_request.number || github.ref }}
+  # Superseded pull request runs are cancelled; a run on main is a record of main and is not.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  chassis:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .node-version
+      - name: Repository hygiene
+        run: node scripts/check-hygiene.mjs
+      - name: Documentation shape
+        run: node scripts/check-docs.mjs
+      - name: Chassis tests
+        run: node --test "test/*.test.mjs"
+      # ultra:begin template
+      - name: Template tests
+        run: node --test "template/*.test.mjs"
+      # ultra:end template
+
+  actionlint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-actionlint
+      - run: actionlint -color
+
+  # zizmor audits the workflows for security rather than syntax: template injection, dangerous
+  # triggers, persisted credentials, cache poisoning. With a token it also confirms each pinned SHA
+  # belongs to the repository it names, so an impostor commit from a fork cannot pass as a pin.
+  zizmor:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-zizmor
+      - run: zizmor .
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+  # ultra:begin go-service
+  go-service:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: services/api-go
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: services/api-go/go.mod
+          cache-dependency-path: services/api-go/go.mod
+      - name: go.mod is tidy
+        run: go mod tidy -diff
+      - name: gofmt
+        run: |
+          unformatted="$(gofmt -l .)"
+          if [ -n "$unformatted" ]; then echo "Not gofmt-formatted:"; echo "$unformatted"; exit 1; fi
+      - run: go vet ./...
+      - run: go test -race ./...
+      - uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
+        with:
+          version: v2.13.2
+          working-directory: services/api-go
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .node-version
+      - name: The task API contract
+        run: node ../../scripts/check-contract.mjs go-service
+      # Building an image proves little; this starts it and asks it the one question a load balancer will.
+      - name: Container image starts and answers
+        run: |
+          docker build --tag api-go:ci .
+          trap 'docker rm --force api-go > /dev/null 2>&1 || true' EXIT
+          docker run --detach --name api-go --publish 8080:8080 api-go:ci
+          for _ in $(seq 1 30); do
+            if curl --fail --silent --show-error localhost:8080/healthz; then exit 0; fi
+            sleep 1
+          done
+          docker logs api-go
+          exit 1
+  # ultra:end go-service
+
+  # ultra:begin ts-service
+  ts-service:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: services/api-ts
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .node-version
+          cache: npm
+          cache-dependency-path: services/api-ts/package-lock.json
+      - run: npm ci --ignore-scripts
+      - run: npm audit signatures
+      - run: npm run verify
+      - name: The task API contract
+        run: node ../../scripts/check-contract.mjs ts-service
+      # Building an image proves little; this starts it and asks it the one question a load balancer will.
+      - name: Container image starts and answers
+        run: |
+          docker build --tag api-ts:ci .
+          trap 'docker rm --force api-ts > /dev/null 2>&1 || true' EXIT
+          docker run --detach --name api-ts --publish 8080:8080 api-ts:ci
+          for _ in $(seq 1 30); do
+            if curl --fail --silent --show-error localhost:8080/healthz; then exit 0; fi
+            sleep 1
+          done
+          docker logs api-ts
+          exit 1
+  # ultra:end ts-service
+
+  # ultra:begin mcp-server
+  mcp-server:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: services/mcp-server
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .node-version
+          cache: npm
+          cache-dependency-path: services/mcp-server/package-lock.json
+      - run: npm ci --ignore-scripts
+      - run: npm audit signatures
+      - run: npm run verify
+      - name: Container image starts and speaks MCP
+        run: |
+          docker build --tag mcp-server:ci .
+          request='{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"ci","version":"0"}}}'
+          reply="$(echo "$request" | timeout 60 docker run --rm -i mcp-server:ci)"
+          echo "$reply"
+          echo "$reply" | grep -q '"serverInfo"'
+  # ultra:end mcp-server
+
+  # ultra:begin py-service
+  py-service:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: services/api-py
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+        with:
+          # The uv version is pinned once, in [tool.uv] required-version, which local uv enforces too.
+          version-file: services/api-py/pyproject.toml
+          enable-cache: true
+          cache-dependency-glob: services/api-py/uv.lock
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .node-version
+      # --locked refuses a lockfile that no longer matches pyproject.toml, as npm ci does; --frozen
+      # would install the stale lock without a word. Later steps use --frozen so nothing re-locks.
+      - run: uv sync --locked
+      - run: uv run --frozen ruff check .
+      - run: uv run --frozen ruff format --check .
+      - run: uv run --frozen mypy
+      - run: uv run --frozen pytest
+      - run: uv run --frozen python scripts/check_boundaries.py
+      - name: The task API contract
+        run: node ../../scripts/check-contract.mjs py-service
+      # Building an image proves little; this starts it and asks it the one question a load balancer will.
+      - name: Container image starts and answers
+        run: |
+          docker build --tag api-py:ci .
+          trap 'docker rm --force api-py > /dev/null 2>&1 || true' EXIT
+          docker run --detach --name api-py --publish 8080:8080 api-py:ci
+          for _ in $(seq 1 30); do
+            if curl --fail --silent --show-error localhost:8080/healthz; then exit 0; fi
+            sleep 1
+          done
+          docker logs api-py
+          exit 1
+  # ultra:end py-service
+
+  # ultra:begin web
+  web:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: apps/web
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .node-version
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+      - run: npm ci --ignore-scripts
+      - run: npm audit signatures
+      - run: npm run verify
+  # ultra:end web
+
+  # ultra:begin ts-library
+  ts-library:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: packages/ts-library
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .node-version
+          cache: npm
+          cache-dependency-path: packages/ts-library/package-lock.json
+      - run: npm ci --ignore-scripts
+      - run: npm audit signatures
+      - run: npm run verify
+  # ultra:end ts-library
+
+  # ultra:begin architecture
+  architecture:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: architecture
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .node-version
+          cache: npm
+          cache-dependency-path: architecture/package-lock.json
+      - run: npm ci --ignore-scripts
+      - run: npm audit signatures
+      - run: npm run verify
+  # ultra:end architecture
+
+  verify:
+    if: always()
+    needs:
+      - chassis
+      - actionlint
+      - zizmor
+      # ultra:begin go-service
+      - go-service
+      # ultra:end go-service
+      # ultra:begin ts-service
+      - ts-service
+      # ultra:end ts-service
+      # ultra:begin mcp-server
+      - mcp-server
+      # ultra:end mcp-server
+      # ultra:begin py-service
+      - py-service
+      # ultra:end py-service
+      # ultra:begin web
+      - web
+      # ultra:end web
+      # ultra:begin ts-library
+      - ts-library
+      # ultra:end ts-library
+      # ultra:begin architecture
+      - architecture
+      # ultra:end architecture
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      # `if: always()` makes this job report even when a dependency failed or was cancelled, so the
+      # check is red rather than missing. It is green only when every dependency succeeded.
+      - name: Every job succeeded
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          echo "$RESULTS" | jq -r 'to_entries[] | "\(.key): \(.value.result)"'
+          echo "$RESULTS" | jq -e 'to_entries | all(.value.result == "success")' > /dev/null

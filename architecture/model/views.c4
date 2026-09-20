@@ -1,0 +1,11 @@
+views {
+  view index {
+    title 'System context'
+    include *
+  }
+
+  view containers of product {
+    title 'Containers'
+    include *
+  }
+}

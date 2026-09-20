@@ -1,0 +1,44 @@
+# Rules whose absence is expensive are pinned by scripts/check-hygiene.mjs. Add rules freely;
+# removing a pinned one fails the build on purpose.
+
+# Dependencies and build output, at any depth: every module has its own.
+node_modules/
+dist/
+build/
+coverage/
+*.tsbuildinfo
+.vite/
+
+# Environment files hold real credentials and never enter the repository.
+.env
+.env.*
+!.env.example
+
+# Personal, machine-local overrides.
+*.local
+*.local.*
+
+# ultra:begin go-service
+# Go build output.
+services/api-go/bin/
+# ultra:end go-service
+
+# ultra:begin architecture
+# LikeC4 exports.
+architecture/png/
+# ultra:end architecture
+
+# Editors and operating systems.
+.DS_Store
+Thumbs.db
+.idea/
+*.swp
+
+# ultra:begin py-service
+__pycache__/
+*.py[cod]
+.venv/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+# ultra:end py-service

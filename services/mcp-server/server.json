@@ -1,0 +1,37 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.hynix666/ultra-template",
+  "title": "ultra-template tasks",
+  "description": "List, create and move tasks through todo, in progress and done.",
+  "repository": {
+    "url": "https://github.com/hynix666/ULTRA-TEMPLATE",
+    "source": "github",
+    "subfolder": "services/mcp-server"
+  },
+  "version": "0.1.0",
+  "packages": [
+    {
+      "registryType": "oci",
+      "identifier": "ghcr.io/hynix666/ultra-template-mcp-server:0.1.0",
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        {
+          "name": "TASK_API_URL",
+          "description": "Where the task API is: an absolute http or https URL.",
+          "isRequired": false,
+          "isSecret": false,
+          "default": "http://localhost:8080"
+        },
+        {
+          "name": "TASK_API_TIMEOUT_MS",
+          "description": "How long one call to the task API may take, in milliseconds.",
+          "isRequired": false,
+          "isSecret": false,
+          "default": "10000"
+        }
+      ]
+    }
+  ]
+}

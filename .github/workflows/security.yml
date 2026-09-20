@@ -1,0 +1,234 @@
+# Report-only security scans: gitleaks over commits, known-vulnerability audits of every
+# dependency lockfile — npm, Go and uv — and a scan of every container image the repository builds.
+#
+# A FINDING does not fail a job: an untuned scanner that goes red on day one teaches everyone to
+# ignore it. A job DOES fail when its scan could not run, because a scanner that errored must not
+# read as "nothing found". Findings are written to the job summary.
+#
+# GitHub secret scanning and push protection are the blocking layer (SECURITY.md); this is the
+# second opinion that also reads history.
+name: security
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "41 5 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  gitleaks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      # The MIT-licensed CLI, not gitleaks-action (proprietary since v2, and it wants write access).
+      # Pinned by version AND by the SHA-256 in the release's checksums file. Bump both together.
+      GITLEAKS_VERSION: "8.30.1"
+      GITLEAKS_SHA256: "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Install gitleaks (checksum-verified)
+        run: |
+          tarball="gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          curl -fsSL --retry 3 --retry-all-errors -o "$tarball" "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/${tarball}"
+          echo "${GITLEAKS_SHA256}  ${tarball}" | sha256sum -c -
+          tar -xzf "$tarball" gitleaks
+
+      # A pull request scans its own commits; push, schedule and manual runs scan all history.
+      # --exit-code 3 separates "found something" from gitleaks' own errors (exit 1).
+      - name: Scan
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          args=(git --no-banner --redact --exit-code 3 --report-format json --report-path gitleaks.json)
+          if [ -n "$BASE_SHA" ]; then args+=("--log-opts=${BASE_SHA}..${HEAD_SHA}"); fi
+          set +e
+          ./gitleaks "${args[@]}" .
+          code=$?
+          set -e
+          if [ "$code" -ne 0 ] && [ "$code" -ne 3 ]; then
+            echo "### gitleaks could not run (exit $code)" >> "$GITHUB_STEP_SUMMARY"
+            exit "$code"
+          fi
+          count=$(jq 'length' gitleaks.json)
+          {
+            echo "### gitleaks: ${count} finding(s), report-only"
+            if [ "$count" -gt 0 ]; then
+              echo ""
+              echo "| Rule | File | Line | Commit |"
+              echo "|---|---|---|---|"
+              jq -r '.[] | "| \(.RuleID) | \(.File) | \(.StartLine) | \(.Commit[0:7]) |"' gitleaks.json | head -100
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # Every npm lockfile in the repository, found from git rather than listed, so a module added or removed
+  # changes what is audited without editing this file. `npm audit` reads the lockfile; nothing installs.
+  npm-audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .node-version
+      - name: npm audit (report-only)
+        run: |
+          # NUL-delimited, so a module path with a space in it stays one path.
+          mapfile -d '' locks < <(git ls-files -z '*package-lock.json')
+          if [ "${#locks[@]}" -eq 0 ]; then echo "### npm audit: no npm lockfiles" >> "$GITHUB_STEP_SUMMARY"; exit 0; fi
+          failed=0
+          for lock in "${locks[@]}"; do
+            dir="$(dirname "$lock")"
+            (cd "$dir" && npm audit --json > "$RUNNER_TEMP/audit.json" 2> /dev/null) || true
+            node -e '
+              const { readFileSync, appendFileSync } = require("node:fs");
+              const out = (s) => appendFileSync(process.env.GITHUB_STEP_SUMMARY, s + "\n");
+              let report = null;
+              try { report = JSON.parse(readFileSync(process.argv[1], "utf8")); } catch {}
+              // String concatenation, not template literals: shellcheck reads a dollar-brace inside
+              // this single-quoted script as a shell expansion that will never happen (SC2016).
+              if (!report?.metadata) { out("### npm audit could not run in " + process.argv[2]); process.exit(2); }
+              const v = report.metadata.vulnerabilities;
+              out("### npm audit " + process.argv[2] + ": " + v.total + " advisory(ies), report-only");
+              out("critical " + v.critical + " · high " + v.high + " · moderate " + v.moderate + " · low " + v.low);
+            ' "$RUNNER_TEMP/audit.json" "$dir" || failed=1
+          done
+          exit "$failed"
+
+  # Every container image the repository builds, found from its Dockerfiles as the lockfiles are above,
+  # scanned for known vulnerabilities in the packages inside it, the operating system's included: none of
+  # the audits above can see those. Only fixable high and critical findings are listed, since only those
+  # can be acted on. Trivy runs as the CLI binary, pinned by version and by the SHA-256 in the release's
+  # checksums file, not through its GitHub Action. Suppress a finding only in .trivyignore, with the reason.
+  # Results go to the job summary and to the log, so a scan's outcome is readable wherever one looks.
+  image-scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      TRIVY_VERSION: "0.74.0"
+      TRIVY_SHA256: "2ae6fe3ee734b7fdf11335663e18c75ea12dccc76062f09f164a3b0f8be4371a"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install Trivy (checksum-verified)
+        run: |
+          tarball="trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz"
+          curl -fsSL --retry 3 --retry-all-errors -o "$tarball" "https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/${tarball}"
+          echo "${TRIVY_SHA256}  ${tarball}" | sha256sum -c -
+          tar -xzf "$tarball" trivy
+
+      - name: Build and scan every image (report-only)
+        run: |
+          # NUL-delimited, so a module path with a space in it stays one path.
+          mapfile -d '' dockerfiles < <(git ls-files -z '*Dockerfile')
+          if [ "${#dockerfiles[@]}" -eq 0 ]; then echo "### image scan: no Dockerfiles" | tee -a "$GITHUB_STEP_SUMMARY"; exit 0; fi
+          failed=0
+          for dockerfile in "${dockerfiles[@]}"; do
+            dir="$(dirname "$dockerfile")"
+            image="scan-$(basename "$dir" | tr '[:upper:]' '[:lower:]'):ci"
+            if ! docker build --quiet --tag "$image" "$dir" > /dev/null; then
+              echo "### image scan could not build ${dir}" | tee -a "$GITHUB_STEP_SUMMARY"
+              failed=1
+              continue
+            fi
+            if ! ./trivy image --quiet --scanners vuln --severity HIGH,CRITICAL --ignore-unfixed \
+                --ignorefile .trivyignore --format json --output "$RUNNER_TEMP/trivy.json" "$image"; then
+              echo "### image scan could not run on ${dir}" | tee -a "$GITHUB_STEP_SUMMARY"
+              failed=1
+              continue
+            fi
+            count="$(jq '[.Results[]?.Vulnerabilities[]?] | length' "$RUNNER_TEMP/trivy.json")"
+            {
+              echo "### image scan ${dir}: ${count} fixable high or critical finding(s), report-only"
+              if [ "$count" -gt 0 ]; then
+                echo ""
+                echo "| Severity | ID | Package | Installed | Fixed in |"
+                echo "|---|---|---|---|---|"
+                jq -r '.Results[]?.Vulnerabilities[]? | "| \(.Severity) | \(.VulnerabilityID) | \(.PkgName) | \(.InstalledVersion) | \(.FixedVersion) |"' "$RUNNER_TEMP/trivy.json" | head -50
+              fi
+            } | tee -a "$GITHUB_STEP_SUMMARY"
+          done
+          exit "$failed"
+
+  # ultra:begin go-service
+
+  # govulncheck reports only vulnerabilities in code the service actually calls, not every advisory for
+  # a module it imports. `go run` downloads the pinned version through the Go checksum database.
+  govulncheck:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: services/api-go
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: services/api-go/go.mod
+          cache: false
+      - name: govulncheck (report-only)
+        run: |
+          set +e
+          go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./... > "$RUNNER_TEMP/govulncheck.txt" 2>&1
+          code=$?
+          set -e
+          {
+            if [ "$code" -eq 0 ]; then echo "### govulncheck: no reachable vulnerabilities"
+            elif [ "$code" -eq 3 ]; then echo "### govulncheck: reachable vulnerabilities found, report-only"
+            else echo "### govulncheck could not run (exit $code)"; fi
+            echo '```'
+            tail -n 60 "$RUNNER_TEMP/govulncheck.txt"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ "$code" -ne 0 ] && [ "$code" -ne 3 ]; then exit "$code"; fi
+  # ultra:end go-service
+  # ultra:begin py-service
+
+  # pip-audit reads the exact versions uv.lock pins, development tools included, as npm audit does.
+  pip-audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: services/api-py
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+        with:
+          version-file: services/api-py/pyproject.toml
+      - name: pip-audit (report-only)
+        run: |
+          uv export --frozen --format requirements-txt --no-emit-project --output-file "$RUNNER_TEMP/requirements.txt" --quiet
+          # pip-audit exits 1 both for findings and for failing to run, so the report decides: it is
+          # written only when the scan completed.
+          uvx pip-audit==2.10.1 --requirement "$RUNNER_TEMP/requirements.txt" --no-deps --disable-pip \
+            --progress-spinner off --format json --output "$RUNNER_TEMP/pip-audit.json" || true
+          node -e '
+            const { readFileSync, appendFileSync } = require("node:fs");
+            const out = (s) => appendFileSync(process.env.GITHUB_STEP_SUMMARY, s + "\n");
+            let report = null;
+            try { report = JSON.parse(readFileSync(process.argv[1], "utf8")); } catch {}
+            // String concatenation, not template literals: see the npm audit job (SC2016).
+            if (!Array.isArray(report?.dependencies)) { out("### pip-audit could not run"); process.exit(2); }
+            const found = report.dependencies.flatMap((d) => (d.vulns || []).map((v) => d.name + " " + d.version + ": " + v.id));
+            out("### pip-audit: " + found.length + " advisory(ies) in " + report.dependencies.length + " packages, report-only");
+            for (const line of found) out("- " + line);
+          ' "$RUNNER_TEMP/pip-audit.json"
+  # ultra:end py-service

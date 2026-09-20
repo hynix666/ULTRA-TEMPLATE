@@ -1,0 +1,43 @@
+name: Bug report
+description: Something does not behave as documented.
+title: "bug: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Search open and closed issues first. **Security problems go through the private process in SECURITY.md, never a public issue.**
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1.
+        2.
+        3.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Operating system, runtime versions, browser — whatever applies.
+  - type: textarea
+    id: output
+    attributes:
+      label: Relevant output
+      description: Logs or error messages. Remove secrets and personal data first.
+      render: text

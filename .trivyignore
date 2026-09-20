@@ -1,0 +1,3 @@
+# Trivy ignore file for the image-scan job in .github/workflows/security.yml.
+# One finding per line, by its ID (for example CVE-2026-12345), with a comment above it saying why
+# it does not apply here. A suppression without a reason is indistinguishable from hiding one.

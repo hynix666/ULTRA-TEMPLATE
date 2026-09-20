@@ -1,0 +1,59 @@
+# CodeQL code scanning.
+#
+# Opt-in: code scanning needs a public repository or GitHub Advanced Security, so the job is skipped
+# until the repository variable CODEQL_ENABLED is set to true — instead of failing on every run in a
+# private repository that cannot use it. It is not part of the required `verify` check.
+name: codeql
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "23 4 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  analyze:
+    # No `name:` here: a job skipped by `if` is reported before its matrix expands, so a name using
+    # matrix values would appear literally as "analyze (${{ matrix.language }})". GitHub's default
+    # matrix names ("analyze (go)") need no expression.
+    if: vars.CODEQL_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      security-events: write
+    strategy:
+      fail-fast: false
+      matrix:
+        language:
+          - actions
+          - javascript-typescript
+          # ultra:begin go-service
+          - go
+          # ultra:end go-service
+          # ultra:begin py-service
+          - python
+          # ultra:end py-service
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # ultra:begin go-service
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        if: matrix.language == 'go'
+        with:
+          go-version-file: services/api-go/go.mod
+          cache: false
+      # ultra:end go-service
+      - uses: github/codeql-action/init@b96794f015dfd88f77b49b1c93e0fa7110f94c63 # v4.38.0
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: ${{ matrix.language == 'go' && 'autobuild' || 'none' }}
+      - uses: github/codeql-action/analyze@b96794f015dfd88f77b49b1c93e0fa7110f94c63 # v4.38.0
+        with:
+          category: /language:${{ matrix.language }}

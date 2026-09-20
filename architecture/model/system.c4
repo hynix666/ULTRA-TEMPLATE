@@ -1,0 +1,56 @@
+// The system this repository builds. Change it in the same pull request as the structure it describes;
+// test/model.test.mjs checks the rules it must satisfy.
+model {
+  user = actor 'User' {
+    description 'Someone who keeps track of their work as tasks.'
+  }
+
+  product = system 'ultra-template' {
+    description 'Tasks created, listed and moved through todo, in progress and done.'
+
+    // ultra:begin web
+    web = webapp 'web' {
+      technology 'React, Vite'
+      description 'Lists tasks and offers only the status moves the API accepts. Calls /api/tasks on the service behind it.'
+      link ../../apps/web/README.md 'README'
+    }
+    user -> web 'manages tasks in the browser'
+    // ultra:end web
+
+    // ultra:begin go-service
+    apiGo = service 'api-go' {
+      technology 'Go, net/http'
+      description 'Task HTTP API in Clean Architecture layers; layer rules enforced by a test.'
+      link ../../services/api-go/README.md 'README'
+    }
+    user -> apiGo 'calls /api/tasks directly or through a client'
+    // ultra:end go-service
+
+    // ultra:begin ts-service
+    apiTs = service 'api-ts' {
+      technology 'TypeScript, Node 24'
+      description 'Task HTTP API with a pure domain core; import boundaries checked on every file.'
+      link ../../services/api-ts/README.md 'README'
+    }
+    user -> apiTs 'calls /api/tasks directly or through a client'
+    // ultra:end ts-service
+
+    // ultra:begin py-service
+    apiPy = service 'api-py' {
+      technology 'Python 3.13, WSGI'
+      description 'Task HTTP API on the standard library; layer rules enforced by an ast-based check.'
+      link ../../services/api-py/README.md 'README'
+    }
+    user -> apiPy 'calls /api/tasks directly or through a client'
+    // ultra:end py-service
+
+    // ultra:begin mcp-server
+    mcpServer = service 'mcp-server' {
+      technology 'TypeScript, Model Context Protocol SDK'
+      description 'Exposes the task API to an AI assistant as MCP tools over stdio. Refuses an illegal status move itself, so the assistant is told which moves are legal instead of discovering a 409.'
+      link ../../services/mcp-server/README.md 'README'
+    }
+    user -> mcpServer 'asks an assistant to manage tasks, which calls its tools'
+    // ultra:end mcp-server
+  }
+}

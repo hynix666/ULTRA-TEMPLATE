@@ -1,0 +1,99 @@
+# release-please keeps an open "release" pull request that collects every Conventional Commit on
+# main since the last release. Merging it tags the release and updates CHANGELOG.md.
+#
+# Off until the repository variable RELEASE_ENABLED is true, and it needs GitHub Actions to be allowed
+# to create pull requests: `node scripts/configure-github.mjs` sets both after initialization.
+#
+# The release pull request is opened by github-actions[bot], and since June 2026 GitHub holds the
+# workflow runs of a bot-opened pull request until someone with write access approves them. So a
+# release is: open the pull request, choose "Approve workflows to run", wait for `verify`, merge.
+# That one click is the human look at what is about to be released. To skip it, give release-please
+# a GitHub App or personal token as the RELEASE_PLEASE_TOKEN secret: a pull request opened by a
+# person or an app starts its checks without approval.
+name: release
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release-please:
+    # Opt-in, like CodeQL and Pages. GitHub copies a template's content as the first commit of a new
+    # repository and runs its workflows before anyone initializes it, so a release job that ran by
+    # default would release the uninitialized template. It stays off until configure-github.mjs runs.
+    if: vars.RELEASE_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      pull-requests: write
+    outputs:
+      release_created: ${{ steps.release.outputs.release_created }}
+      tag_name: ${{ steps.release.outputs.tag_name }}
+    steps:
+      - id: release
+        uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
+        with:
+          token: ${{ secrets.RELEASE_PLEASE_TOKEN || github.token }}
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+
+  # ultra:begin ts-library
+
+  # Publishes packages/ts-library at the version just released, with provenance. Opt-in: npm must trust
+  # this workflow first (packages/ts-library/README.md), so it runs only when NPM_PUBLISH_ENABLED is true.
+  # No npm token exists anywhere: id-token: write lets npm verify the workflow through OpenID Connect.
+  publish-library:
+    needs: release-please
+    if: needs.release-please.outputs.release_created == 'true' && vars.NPM_PUBLISH_ENABLED == 'true'
+    # A deployment environment: npm's trusted publisher can require it, and its settings can add a
+    # required reviewer or limit which refs may publish, with no change to this file.
+    environment: npm
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write
+    defaults:
+      run:
+        working-directory: packages/ts-library
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.release-please.outputs.tag_name }}
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .node-version
+          registry-url: https://registry.npmjs.org
+      - name: npm supports trusted publishing
+        run: node -e 'const [a, b, c] = process.argv[1].split(".").map(Number); if (a < 11 || (a === 11 && (b < 5 || (b === 5 && c < 1)))) { console.error("npm " + process.argv[1] + " is older than 11.5.1, which trusted publishing needs"); process.exit(1); }' "$(npm --version)"
+      - run: npm ci --ignore-scripts
+      - name: Set the version from the release tag
+        env:
+          TAG: ${{ needs.release-please.outputs.tag_name }}
+        run: npm version "${TAG#v}" --no-git-tag-version
+      - run: npm publish
+  # ultra:end ts-library
+  # ultra:begin mcp-server
+
+  # Publishes the MCP server for the version just released; mcp-publish.yml explains how. Opt-in, like
+  # the library: MCP_PUBLISH_ENABLED stays unset until the one-time steps in services/mcp-server/README.md.
+  publish-mcp-server:
+    needs: release-please
+    if: needs.release-please.outputs.release_created == 'true' && vars.MCP_PUBLISH_ENABLED == 'true'
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+    uses: ./.github/workflows/mcp-publish.yml
+    with:
+      version: ${{ needs.release-please.outputs.tag_name }}
+  # ultra:end mcp-server

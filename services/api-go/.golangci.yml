@@ -1,0 +1,25 @@
+version: "2"
+
+# The standard set plus linters that each catch a class of defect the compiler does not. Style-only
+# linters are left out on purpose, so that a finding is always worth reading.
+linters:
+  default: standard
+  enable:
+    - bodyclose
+    - errorlint
+    - gocritic
+    - gosec
+    - misspell
+    - noctx
+    - nolintlint
+    - revive
+    - unconvert
+  settings:
+    nolintlint:
+      require-explanation: true
+      require-specific: true
+
+formatters:
+  enable:
+    - gofmt
+    - goimports

@@ -1,0 +1,85 @@
+# Template-only: init deletes this workflow.
+#
+# The template is only as good as what it generates, so this generates a project from every preset
+# and runs that project's own setup, verify and actionlint. A marker in the wrong place, a feature that silently
+# depends on another, or a workflow that stops parsing once a block is removed fails here, before
+# anyone creates a repository from it.
+name: template-test
+
+on:
+  # Not on push to main: the ruleset admits a change only through a pull request that is up to date
+  # with main, so the commit a merge produces is the one this already generated every preset from.
+  pull_request:
+  # Weekly even with no commits: a runner image, a toolchain release or a registry can break a
+  # generated project while the template itself stands still, and a template is judged by what it
+  # generates on the day someone uses it.
+  schedule:
+    - cron: "17 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: template-test-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  preset:
+    name: preset (${{ matrix.preset }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        preset: [minimal, go-api, py-api, fullstack-ts, library, mcp, all]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .node-version
+      # Only the toolchains this preset's features need. Read from features.json rather than restated
+      # here, so a preset that gains a feature needs no edit to this file. (The version files below
+      # are read before init runs, while the checkout still holds every feature.)
+      - name: Toolchains this preset needs
+        id: needs
+        env:
+          PRESET: ${{ matrix.preset }}
+        run: |
+          node -e '
+            const { presets } = require("./template/features.json");
+            const features = presets[process.env.PRESET] ?? [];
+            const { appendFileSync } = require("node:fs");
+            appendFileSync(process.env.GITHUB_OUTPUT, "go=" + features.includes("go-service") + "\n");
+            appendFileSync(process.env.GITHUB_OUTPUT, "python=" + features.includes("py-service") + "\n");
+          '
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        if: steps.needs.outputs.go == 'true'
+        with:
+          go-version-file: services/api-go/go.mod
+          cache: false
+      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+        if: steps.needs.outputs.python == 'true'
+        with:
+          version-file: services/api-py/pyproject.toml
+      - uses: ./.github/actions/setup-actionlint
+      - uses: ./.github/actions/setup-zizmor
+
+      # In place, on this job's own fresh checkout — exactly what an adopter runs after "Use this
+      # template". The unit tests cover --out; this covers the path people actually take.
+      - name: Initialize in place
+        env:
+          PRESET: ${{ matrix.preset }}
+        run: node template/init.mjs --name demo-app --owner octo-org --preset "$PRESET"
+
+      - name: Commit, install and verify the initialized project
+        run: |
+          git add -A
+          git -c user.name=ci -c user.email=ci@example.invalid commit -q -m "chore: initialize project"
+          test ! -e template || { echo "::error::template/ survived initialization"; exit 1; }
+          node scripts/setup.mjs
+          node scripts/verify.mjs
+          actionlint -color
+          zizmor --offline .
