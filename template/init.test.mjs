@@ -285,6 +285,25 @@ test("every preset generates a project that passes its own chassis checks and do
   }
 });
 
+test("every feature on its own generates a project that passes its chassis checks", (t) => {
+  // Presets are combinations. A feature selected alone is what --features allows, and what ADR-0004
+  // claims when it calls modules independent and removable; nothing else proves one stands without
+  // the others. check-hygiene also fails on a marker line that survived, once template/ is gone.
+  const manifest = loadManifest();
+  const base = mkdtempSync(join(tmpdir(), "features-"));
+  t.after(() => rmSync(base, { recursive: true, force: true }));
+  for (const id of Object.keys(manifest.features)) {
+    const out = join(base, id);
+    execFileSync("node", ["template/init.mjs", "--name", "demo-app", "--owner", "octo", "--features", id, "--out", out], { cwd: ROOT, stdio: "pipe" });
+    execFileSync("git", ["init", "-q"], { cwd: out });
+    execFileSync("git", ["add", "-A"], { cwd: out });
+    for (const check of ["scripts/check-hygiene.mjs", "scripts/check-docs.mjs"]) {
+      assert.doesNotThrow(() => execFileSync("node", [check], { cwd: out, stdio: "pipe" }), `${id}: ${check}`);
+    }
+    assert.equal(existsSync(join(out, "template")), false, `${id}: template/ survived`);
+  }
+});
+
 test("--description is written under the README title, in place of the generated sentence", (t) => {
   const out = mkdtempSync(join(tmpdir(), "init-"));
   t.after(() => rmSync(out, { recursive: true, force: true }));
