@@ -1,0 +1,39 @@
+# Checks the pull request TITLE against Conventional Commits. Pull requests are squash-merged, so
+# the title becomes the commit on main — and, with release-please, decides the next version.
+#
+# It runs on pull_request, not pull_request_target: a check that only reads the title needs none of
+# the base repository's privileges, and pull_request_target would run with them on every fork's pull
+# request (zizmor: dangerous-triggers). A fork's pull request runs with a read-only token either way.
+name: pr-title
+
+on:
+  pull_request:
+    types: [opened, edited, reopened, synchronize]
+
+permissions:
+  pull-requests: read
+
+jobs:
+  pr-title:
+    name: pr-title
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: amannn/action-semantic-pull-request@48f256284bd46cdaab1048c3721360e808335d50 # v6.1.1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          # Written out so an action upgrade cannot change the contribution rules silently.
+          # CONTRIBUTING.md and dependabot.yml depend on this list.
+          types: |
+            build
+            chore
+            ci
+            docs
+            feat
+            fix
+            perf
+            refactor
+            revert
+            style
+            test

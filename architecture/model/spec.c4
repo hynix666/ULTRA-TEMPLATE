@@ -1,0 +1,22 @@
+specification {
+  element actor {
+    style {
+      shape person
+    }
+  }
+
+  element system {
+    notation "Software system"
+  }
+
+  element service {
+    notation "Deployable service"
+  }
+
+  element webapp {
+    notation "Web application"
+    style {
+      shape browser
+    }
+  }
+}

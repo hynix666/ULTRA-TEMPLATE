@@ -1,0 +1,51 @@
+{
+  "$comment": "The task API contract every task service answers identically, checked over HTTP by scripts/check-contract.mjs. `{id}` is replaced by a task created for that case, in the todo status. A case lists the status and, where it is part of the contract, the shape of the answer. Paths that are not canonical (`//api/tasks`, `/api/../api/tasks`) are left out on purpose: each language's standard server cleans or rejects them before the service sees the request.",
+  "cases": [
+    { "name": "health", "method": "GET", "path": "/healthz", "status": 200, "json": { "status": "ok" } },
+    { "name": "health answers HEAD like GET", "method": "HEAD", "path": "/healthz", "status": 200 },
+    { "name": "health refuses other methods", "method": "POST", "path": "/healthz", "status": 405, "error": true },
+
+    { "name": "list", "method": "GET", "path": "/api/tasks", "status": 200, "array": true },
+    { "name": "list answers HEAD like GET", "method": "HEAD", "path": "/api/tasks", "status": 200 },
+    { "name": "list ignores a query string", "method": "GET", "path": "/api/tasks?limit=1", "status": 200, "array": true },
+    { "name": "list refuses DELETE", "method": "DELETE", "path": "/api/tasks", "status": 405, "error": true },
+    { "name": "list refuses OPTIONS", "method": "OPTIONS", "path": "/api/tasks", "status": 405, "error": true },
+
+    { "name": "create", "method": "POST", "path": "/api/tasks", "body": "{\"title\":\"  Write it  \"}", "status": 201, "task": { "title": "Write it", "status": "todo" } },
+    { "name": "create reads JSON whatever the content type", "method": "POST", "path": "/api/tasks", "contentType": "text/plain", "body": "{\"title\":\"plain\"}", "status": 201 },
+    { "name": "create counts code points, not bytes", "method": "POST", "path": "/api/tasks", "body": { "title": { "repeat": "🙂", "times": 200 } }, "status": 201 },
+    { "name": "create refuses an empty title", "method": "POST", "path": "/api/tasks", "body": "{\"title\":\"   \"}", "status": 422, "error": true },
+    { "name": "create reads a missing title as empty", "method": "POST", "path": "/api/tasks", "body": "{}", "status": 422, "error": true },
+    { "name": "create reads a null title as empty", "method": "POST", "path": "/api/tasks", "body": "{\"title\":null}", "status": 422, "error": true },
+    { "name": "create refuses a 201-character title", "method": "POST", "path": "/api/tasks", "body": { "title": { "repeat": "a", "times": 201 } }, "status": 422, "error": true },
+    { "name": "create refuses a title that is not a string", "method": "POST", "path": "/api/tasks", "body": "{\"title\":7}", "status": 400, "error": true },
+    { "name": "create refuses an undocumented field", "method": "POST", "path": "/api/tasks", "body": "{\"title\":\"a\",\"x\":1}", "status": 400, "error": true },
+    { "name": "create refuses an empty body", "method": "POST", "path": "/api/tasks", "body": "", "status": 400, "error": true },
+    { "name": "create refuses a body that is not an object", "method": "POST", "path": "/api/tasks", "body": "[1,2]", "status": 400, "error": true },
+    { "name": "create refuses JSON null", "method": "POST", "path": "/api/tasks", "body": "null", "status": 400, "error": true },
+    { "name": "create refuses text after the object", "method": "POST", "path": "/api/tasks", "body": "{\"title\":\"a\"} x", "status": 400, "error": true },
+    { "name": "create refuses two objects", "method": "POST", "path": "/api/tasks", "body": "{\"title\":\"a\"}{\"title\":\"b\"}", "status": 400, "error": true },
+    { "name": "create refuses a body over 1 MiB", "method": "POST", "path": "/api/tasks", "body": { "title": { "repeat": "a", "times": 1048576 } }, "status": 400, "error": true },
+
+    { "name": "get", "method": "GET", "path": "/api/tasks/{id}", "status": 200, "task": { "status": "todo" } },
+    { "name": "get answers HEAD like GET", "method": "HEAD", "path": "/api/tasks/{id}", "status": 200 },
+    { "name": "get an unknown task", "method": "GET", "path": "/api/tasks/no-such-task", "status": 404, "error": true },
+    { "name": "get refuses a malformed escape", "method": "GET", "path": "/api/tasks/%zz", "status": 400 },
+    { "name": "a trailing slash is another path", "method": "GET", "path": "/api/tasks/", "status": 404, "error": true },
+    { "name": "an unknown path", "method": "GET", "path": "/api", "status": 404, "error": true },
+    { "name": "a path below a task", "method": "GET", "path": "/api/tasks/{id}/status/more", "status": 404, "error": true },
+    { "name": "a task refuses PUT", "method": "PUT", "path": "/api/tasks/{id}", "body": "{}", "status": 405, "error": true },
+    { "name": "a task refuses PATCH on itself", "method": "PATCH", "path": "/api/tasks/{id}", "body": "{\"status\":\"done\"}", "status": 405, "error": true },
+
+    { "name": "move", "method": "PATCH", "path": "/api/tasks/{id}/status", "body": "{\"status\":\"in_progress\"}", "status": 200, "task": { "status": "in_progress" } },
+    { "name": "move refuses a skipped step", "method": "PATCH", "path": "/api/tasks/{id}/status", "body": "{\"status\":\"done\"}", "status": 409, "error": true },
+    { "name": "move refuses staying put", "method": "PATCH", "path": "/api/tasks/{id}/status", "body": "{\"status\":\"todo\"}", "status": 409, "error": true },
+    { "name": "move refuses an unknown status", "method": "PATCH", "path": "/api/tasks/{id}/status", "body": "{\"status\":\"archived\"}", "status": 422, "error": true },
+    { "name": "move reads a null status as unknown", "method": "PATCH", "path": "/api/tasks/{id}/status", "body": "{\"status\":null}", "status": 422, "error": true },
+    { "name": "move reads a missing status as unknown", "method": "PATCH", "path": "/api/tasks/{id}/status", "body": "{}", "status": 422, "error": true },
+    { "name": "move refuses an empty body", "method": "PATCH", "path": "/api/tasks/{id}/status", "body": "", "status": 400, "error": true },
+    { "name": "move refuses an undocumented field", "method": "PATCH", "path": "/api/tasks/{id}/status", "body": "{\"status\":\"in_progress\",\"x\":1}", "status": 400, "error": true },
+    { "name": "move an unknown task", "method": "PATCH", "path": "/api/tasks/no-such-task/status", "body": "{\"status\":\"in_progress\"}", "status": 404, "error": true },
+    { "name": "the status path refuses GET", "method": "GET", "path": "/api/tasks/{id}/status", "status": 405, "error": true }
+  ]
+}

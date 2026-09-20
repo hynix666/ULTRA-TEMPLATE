@@ -1,0 +1,15 @@
+{
+  "name": "ultra-template",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "setup": "node scripts/setup.mjs",
+    "verify": "node scripts/verify.mjs",
+    "check:hygiene": "node scripts/check-hygiene.mjs",
+    "check:docs": "node scripts/check-docs.mjs"
+  }
+}

@@ -1,0 +1,44 @@
+# The environment GitHub's Copilot coding agent prepares before it works on this repository.
+# The Dev Container does this for an agent running on a developer's machine; this does it for the
+# one running in GitHub's. An agent that cannot install dependencies cannot run `verify`, and an
+# agent that cannot run `verify` will report work it did not check.
+name: Copilot setup steps
+
+on:
+  workflow_dispatch:
+  # Changing the setup is the one case where running it is the only way to know it still works.
+  push:
+    paths: [.github/workflows/copilot-setup-steps.yml]
+  pull_request:
+    paths: [.github/workflows/copilot-setup-steps.yml]
+
+permissions:
+  contents: read
+
+jobs:
+  # The job id must be exactly this, or Copilot does not pick it up.
+  copilot-setup-steps:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .node-version
+      # ultra:begin go-service
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: services/api-go/go.mod
+          cache-dependency-path: services/api-go/go.mod
+      # ultra:end go-service
+      # ultra:begin py-service
+      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+        with:
+          version-file: services/api-py/pyproject.toml
+          enable-cache: true
+          cache-dependency-glob: services/api-py/uv.lock
+      # ultra:end py-service
+      - name: Install every module's dependencies
+        run: node scripts/setup.mjs

@@ -1,0 +1,44 @@
+{
+  "name": "@hynix666/ultra-template",
+  "version": "0.0.0",
+  "description": "Task status rules for clients of the ultra-template task API.",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "sideEffects": false,
+  "engines": {
+    "node": ">=24"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/hynix666/ULTRA-TEMPLATE.git",
+    "directory": "packages/ts-library"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "test": "node --test \"test/**/*.test.ts\"",
+    "check:package": "publint --strict && attw --pack . --profile esm-only",
+    "verify": "npm run typecheck && npm test && npm run build && npm run check:package && npm run check:install",
+    "prepack": "npm run build",
+    "check:install": "node scripts/check-install.mjs"
+  },
+  "devDependencies": {
+    "@arethetypeswrong/cli": "^0.18.5",
+    "@types/node": "^24.13.4",
+    "publint": "^0.3.24",
+    "typescript": "^7.0.2"
+  }
+}

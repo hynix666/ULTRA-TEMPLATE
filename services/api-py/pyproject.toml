@@ -1,0 +1,47 @@
+[project]
+name = "api-py"
+version = "0.1.0"
+description = "Task HTTP API: Clean Architecture layers, standard library only"
+requires-python = ">=3.13"
+# No runtime dependencies, as in api-go and api-ts. The transport is a WSGI application, so a
+# production server is a deployment choice rather than something this code depends on.
+dependencies = []
+
+[dependency-groups]
+dev = ["mypy>=1.18.2", "pytest>=8.4.2", "ruff>=0.14.4"]
+
+[tool.uv]
+# The one place uv's version is pinned: uv refuses to run outside this range, and every workflow's
+# setup-uv step reads it. Pre-1.0, a minor release can change behaviour, so the range stops there.
+required-version = ">=0.12.5,<0.13"
+# The service runs from src/, as its image does, and is never built as a package. So `uv sync` installs
+# only what uv.lock pins: no build backend is fetched unpinned and run at install time.
+package = false
+
+[tool.ruff]
+line-length = 120
+src = ["src", "tests", "scripts"]
+
+[tool.ruff.lint]
+# Warnings are errors here, as they are in golangci-lint and strict TypeScript.
+select = ["E", "F", "W", "I", "N", "UP", "B", "A", "C4", "SIM", "RET", "PTH", "ARG", "TID", "RUF", "BLE", "S"]
+ignore = ["S104"] # Binding to every interface is what a container image is for.
+
+[tool.ruff.lint.per-file-ignores]
+# Tests assert on internals and use short names; both are appropriate there.
+"tests/*" = ["S101", "ARG001", "SLF001"]
+
+[tool.mypy]
+python_version = "3.13"
+files = ["src", "tests", "scripts"]
+mypy_path = "src"
+strict = true
+warn_unreachable = true
+enable_error_code = ["ignore-without-code", "redundant-expr", "truthy-bool"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# Nothing is installed as a package: the tests import the service from src/ and the boundary checker
+# from scripts/.
+pythonpath = ["src", "scripts"]
+addopts = "-q"

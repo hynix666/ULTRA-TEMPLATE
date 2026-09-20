@@ -1,0 +1,43 @@
+:root {
+  color-scheme: light dark;
+  font-family: system-ui, sans-serif;
+  line-height: 1.5;
+}
+
+main {
+  max-width: 40rem;
+  margin: 2rem auto;
+  padding-inline: 1rem;
+}
+
+form,
+li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+input {
+  flex: 1;
+  min-width: 12rem;
+  padding: 0.4rem 0.6rem;
+}
+
+ul {
+  padding: 0;
+  list-style: none;
+}
+
+li {
+  padding-block: 0.5rem;
+  border-bottom: 1px solid color-mix(in srgb, currentColor 15%, transparent);
+}
+
+li span {
+  flex: 1;
+}
+
+[role="alert"] {
+  color: #c62828;
+}

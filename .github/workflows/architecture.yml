@@ -1,0 +1,64 @@
+# Publishes the LikeC4 model as a static site on GitHub Pages.
+#
+# Opt-in: enable Pages with the "GitHub Actions" source (Settings → Pages), then set the repository
+# variable PAGES_ENABLED to true. Until then both jobs are skipped. The model itself is validated on
+# every pull request by the architecture job in verify.yml; this workflow only publishes main.
+name: architecture-site
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - architecture/**
+      - .github/workflows/architecture.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# One deployment at a time, and an in-progress one is never cancelled halfway.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    if: vars.PAGES_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: architecture
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .node-version
+          cache: npm
+          cache-dependency-path: architecture/package-lock.json
+      - run: npm ci --ignore-scripts
+      - id: pages
+        uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
+      - name: Build the site
+        env:
+          BASE_PATH: ${{ steps.pages.outputs.base_path }}
+        run: npx likec4 build model --output dist --base "${BASE_PATH}/"
+      - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: architecture/dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1

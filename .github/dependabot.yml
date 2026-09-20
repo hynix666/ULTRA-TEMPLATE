@@ -1,0 +1,196 @@
+# Weekly dependency updates, grouped: one pull request per ecosystem per week rather than one per
+# package.
+#
+# Commit prefixes are types pr-title.yml accepts; any other prefix would open every update with a
+# failing check. Actions are pinned to commit SHAs (verify.yml says why) and Dependabot bumps the
+# SHA and its version comment together — read the upstream release before merging, because a pin
+# only protects when someone looks at the new SHA.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    commit-message:
+      prefix: ci
+    groups:
+      actions:
+        patterns: ["*"]
+
+  # ultra:begin go-service
+  - package-ecosystem: gomod
+    directory: /services/api-go
+    schedule:
+      interval: weekly
+      day: monday
+    commit-message:
+      prefix: chore
+      include: scope
+    groups:
+      go:
+        patterns: ["*"]
+
+  - package-ecosystem: docker
+    directory: /services/api-go
+    schedule:
+      interval: weekly
+      day: monday
+    commit-message:
+      prefix: chore
+      include: scope
+    ignore:
+      # The build image's Go version follows the `go` line in go.mod, which CI also reads. Patch
+      # releases still arrive as digest updates; a new Go release is a deliberate go.mod change.
+      - dependency-name: golang
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+  # ultra:end go-service
+
+  # ultra:begin ts-service
+  - package-ecosystem: npm
+    directory: /services/api-ts
+    schedule:
+      interval: weekly
+      day: monday
+    commit-message:
+      prefix: chore
+      include: scope
+    groups:
+      api-ts:
+        patterns: ["*"]
+    ignore:
+      # @types/node describes the Node that runs the code (.node-version). A newer major lets code
+      # compile against APIs the runtime lacks; move it with .node-version, never ahead of it.
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
+
+  - package-ecosystem: docker
+    directory: /services/api-ts
+    schedule:
+      interval: weekly
+      day: monday
+    commit-message:
+      prefix: chore
+      include: scope
+    ignore:
+      # The image's Node major follows .node-version, which CI and every module's engines use.
+      - dependency-name: node
+        update-types: ["version-update:semver-major"]
+  # ultra:end ts-service
+
+  # ultra:begin mcp-server
+  - package-ecosystem: npm
+    directory: /services/mcp-server
+    schedule:
+      interval: weekly
+      day: monday
+    commit-message:
+      prefix: chore
+      include: scope
+    groups:
+      mcp-server:
+        patterns: ["*"]
+    ignore:
+      # @types/node describes the Node that runs the code (.node-version), so it moves with it.
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
+
+  - package-ecosystem: docker
+    directory: /services/mcp-server
+    schedule:
+      interval: weekly
+      day: monday
+    commit-message:
+      prefix: chore
+      include: scope
+    ignore:
+      # The image's Node major follows .node-version, which CI and every module's engines use.
+      - dependency-name: node
+        update-types: ["version-update:semver-major"]
+  # ultra:end mcp-server
+
+  # ultra:begin py-service
+  - package-ecosystem: uv
+    directory: /services/api-py
+    schedule:
+      interval: weekly
+      day: monday
+    commit-message:
+      prefix: chore
+      include: scope
+    groups:
+      api-py:
+        patterns: ["*"]
+
+  - package-ecosystem: docker
+    directory: /services/api-py
+    schedule:
+      interval: weekly
+      day: monday
+    commit-message:
+      prefix: chore
+      include: scope
+    ignore:
+      # The image's Python minor follows .python-version, which uv and CI both read.
+      - dependency-name: python
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+  # ultra:end py-service
+
+  # ultra:begin web
+  - package-ecosystem: npm
+    directory: /apps/web
+    schedule:
+      interval: weekly
+      day: monday
+    commit-message:
+      prefix: chore
+      include: scope
+    groups:
+      web:
+        patterns: ["*"]
+    ignore:
+      # Same reason as api-ts: @types/node moves with .node-version, never ahead of it.
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
+  # ultra:end web
+
+  # ultra:begin ts-library
+  - package-ecosystem: npm
+    directory: /packages/ts-library
+    schedule:
+      interval: weekly
+      day: monday
+    commit-message:
+      prefix: chore
+      include: scope
+    groups:
+      ts-library:
+        patterns: ["*"]
+    ignore:
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
+  # ultra:end ts-library
+
+  # ultra:begin architecture
+  - package-ecosystem: npm
+    directory: /architecture
+    schedule:
+      interval: weekly
+      day: monday
+    commit-message:
+      prefix: chore
+      include: scope
+    groups:
+      architecture:
+        patterns: ["*"]
+  # ultra:end architecture
+
+  # ultra:begin devcontainer
+  - package-ecosystem: devcontainers
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    commit-message:
+      prefix: chore
+  # ultra:end devcontainer

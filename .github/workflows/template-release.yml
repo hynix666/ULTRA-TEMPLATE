@@ -1,0 +1,48 @@
+# Template-only: init deletes this workflow.
+#
+# "Use this template" copies the default branch as it is, not the latest release, and init writes the
+# version in template/features.json into every new project as the release it came from. So main must
+# never name a version that has not been released: a project made in that gap would record a release
+# that does not exist, and template-update could not start from it. When a merge changes the version,
+# this publishes that release at that commit, with notes that say what changes in generated projects.
+name: template-release
+
+on:
+  push:
+    branches: [main]
+    paths: [template/features.json]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: template-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .node-version
+      - name: Release the version features.json names, unless it already exists
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION="v$(node -p "require('./template/features.json').version")"
+          if gh release view "$VERSION" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            echo "$VERSION is already released; nothing to do."
+            exit 0
+          fi
+          node template/release-notes.mjs --to "$VERSION" --repo "$GITHUB_REPOSITORY" > "$RUNNER_TEMP/notes.md"
+          gh release create "$VERSION" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+            --title "$VERSION" --notes-file "$RUNNER_TEMP/notes.md"

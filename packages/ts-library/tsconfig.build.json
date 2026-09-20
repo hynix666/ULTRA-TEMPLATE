@@ -1,0 +1,14 @@
+{
+  // What ships: JavaScript and declarations for src/ only, with `.ts` import specifiers rewritten to `.js`.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "declaration": true,
+    // Every export states its type, so declarations never depend on inference across files.
+    "isolatedDeclarations": true,
+    "rootDir": "src",
+    "outDir": "dist",
+    "types": []
+  },
+  "include": ["src"]
+}

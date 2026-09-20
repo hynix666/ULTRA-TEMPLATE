@@ -1,0 +1,11 @@
+# LF everywhere, on every platform: hashes, diffs and shell scripts stay identical on Windows.
+* text=auto eol=lf
+
+*.png binary
+*.jpg binary
+*.ico binary
+
+# Generated lockfiles: collapsed in pull request diffs and left out of language statistics. They
+# are still reviewable, and should be reviewed — a lockfile change is a dependency change.
+package-lock.json linguist-generated=true
+go.sum linguist-generated=true

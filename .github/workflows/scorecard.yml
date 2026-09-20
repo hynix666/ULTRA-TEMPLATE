@@ -1,0 +1,40 @@
+# OpenSSF Scorecard: an outside measurement of the practices this repository claims — pinned
+# dependencies, branch protection, token permissions, a security policy — published where anyone can
+# check it, and uploaded to code scanning so a regression shows up as an alert.
+#
+# Off until the repository variable SCORECARD_ENABLED is set to true: results are only published for
+# a public repository, and code scanning needs a public repository or GitHub Advanced Security.
+#
+# Publishing constrains this file, and the Scorecard API rejects results from a workflow that breaks
+# the rules: no top-level env or defaults, no write permission at the top, id-token only on this job,
+# and only checkout, upload-artifact, upload-sarif and scorecard-action as steps. Add nothing else here.
+name: scorecard
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "37 5 * * 1"
+
+permissions: read-all
+
+jobs:
+  analysis:
+    if: vars.SCORECARD_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      security-events: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ossf/scorecard-action@2d1146689b8cda280b9bc96326124645441f03bc # v2.4.4
+        with:
+          results_file: results.sarif
+          results_format: sarif
+          publish_results: true
+      - uses: github/codeql-action/upload-sarif@b96794f015dfd88f77b49b1c93e0fa7110f94c63 # v4.38.0
+        with:
+          sarif_file: results.sarif
