@@ -6,6 +6,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { loadConfig } from "../src/config.ts";
+import { STATUSES } from "../src/domain/task.ts";
 
 const root = new URL("../", import.meta.url);
 const manifest = JSON.parse(readFileSync(new URL("server.json", root), "utf8")) as {
@@ -51,4 +52,9 @@ test("every advertised variable is one the server reads, with the default it rea
     if (value === undefined) continue;
     assert.deepEqual(loadConfig({ [name]: value }), defaults, `${name}=${value} is not the default the server applies`);
   }
+});
+
+test("the registry description names every status a task moves through", () => {
+  for (const status of STATUSES)
+    assert.ok(manifest.description.includes(status.replaceAll("_", " ")), `the description does not name ${status}`);
 });

@@ -76,7 +76,7 @@ export function validateManifest(manifest, where = MANIFEST) {
   if (!isObject(manifest)) return [`${where} is not a JSON object`];
   const problems = [];
   const say = (message) => problems.push(`${where}: ${message}`);
-  for (const key of unknownKeys(manifest, ["id", "toolchain", "checks", "coverage", "taskApi", "facts", "image"])) say(`unknown key \`${key}\``);
+  for (const key of unknownKeys(manifest, ["id", "toolchain", "checks", "coverage", "taskApi", "facts", "e2e", "image"])) say(`unknown key \`${key}\``);
   if (typeof manifest.id !== "string" || !/^[a-z][a-z0-9-]*$/.test(manifest.id)) say("`id` must be lowercase letters, digits and hyphens, starting with a letter");
   if (!(manifest.toolchain in TOOLCHAINS)) say(`\`toolchain\` must be one of ${Object.keys(TOOLCHAINS).join(", ")}`);
   if (!Array.isArray(manifest.checks) || manifest.checks.length === 0) say("`checks` must list at least one check");
@@ -117,8 +117,22 @@ export function validateManifest(manifest, where = MANIFEST) {
       for (const key of facts.keys) if (!FACTS.includes(key)) say(`facts.keys names \`${key}\`, which is not one of ${FACTS.join(", ")}`);
     }
   }
+  if (manifest.e2e !== undefined) {
+    const { e2e } = manifest;
+    if (!isObject(e2e) || !isCommand(e2e.run) || unknownKeys(e2e, ["run"]).length > 0) say("`e2e` is {\"run\": command}");
+    else if (!e2e.run.some((part) => part.includes("{taskApi}"))) say("`e2e.run` must pass the task API's address as {taskApi}");
+  }
   if (manifest.image !== undefined && !IMAGE_PROBES.includes(manifest.image)) say(`\`image\` must be one of ${IMAGE_PROBES.join(", ")}`);
   return problems;
+}
+
+/**
+ * The task service a module's end-to-end check runs against: one present that serves the task API,
+ * preferring one on the module's own toolchain so the check needs no other; null when none is present.
+ */
+export function e2ePartner(module, modules) {
+  const services = modules.filter((m) => m.taskApi);
+  return services.find((m) => m.toolchain === module.toolchain) ?? services[0] ?? null;
 }
 
 // Directories that never hold a module: dependencies, caches, build output and the template machinery.

@@ -14,6 +14,11 @@
  *
  *   node scripts/check-contract.mjs              # every task service present
  *   node scripts/check-contract.mjs py-service   # one
+ *   node scripts/check-contract.mjs --e2e mcp-server [--service ts-service]
+ *
+ * `--e2e` starts a task service (the one named, or e2ePartner's choice) and runs a client module's own
+ * end-to-end command against it: its module.json `e2e.run`, with `{taskApi}` replaced by the service's
+ * address. The client drives the real API with its own dependencies, so this script needs none.
  *
  * Exit 0 every case matched · 1 a service answered differently · 2 a service could not be started,
  * or a name is not a task service present here.
@@ -25,7 +30,7 @@ import { createServer } from "node:net";
 import { availableParallelism, tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
-import { presentModules, ROOT } from "./modules.mjs";
+import { e2ePartner, presentModules, ROOT, run } from "./modules.mjs";
 import { loadRules } from "./rules/load.mjs";
 
 export const CASES_FILE = join(ROOT, "scripts", "contract", "tasks-api.json");
@@ -562,7 +567,56 @@ async function checkService(module, contract, facts) {
   }
 }
 
+/** Starts `service`, runs `client`'s end-to-end command against it, and returns that command's exit code. */
+async function runE2e(client, service, contract, facts) {
+  const scratch = mkdtempSync(join(tmpdir(), "contract-"));
+  const dir = join(ROOT, service.dir);
+  try {
+    const cmd = startCommand(service, dir, scratch);
+    if (cmd === null) return { fatal: `${service.id} did not build` };
+    const port = await freePort();
+    const base = `http://127.0.0.1:${port}`;
+    const running = start(cmd, dir, configEnv(contract.config, null, port));
+    try {
+      if (!(await waitForReady(base, running, contract.startup.ready, facts))) {
+        return { fatal: `${service.id} did not answer ${contract.startup.ready.path} within ${STARTUP_MS / 1000}s. ${running.output.stderr.trim().slice(-400)}` };
+      }
+      const [command, ...args] = expandCommand(client.e2e.run, { taskApi: base });
+      return { code: run(command, args, { cwd: join(ROOT, client.dir) }).status };
+    } finally {
+      await stop(running);
+    }
+  } finally {
+    rmSync(scratch, { recursive: true, force: true });
+  }
+}
+
+async function e2eMain(args) {
+  const present = presentModules();
+  const client = present.find((m) => m.id === args[0] && m.e2e);
+  if (!client) {
+    console.error(`check-contract: ${args[0] ?? "(none)"} is not a module present here with an e2e check. Present: ${present.filter((m) => m.e2e).map((m) => m.id).join(", ") || "none"}.`);
+    return 2;
+  }
+  const named = args[1] === "--service" ? args[2] : undefined;
+  const service = named === undefined ? e2ePartner(client, present) : present.find((m) => m.id === named && m.taskApi);
+  if (!service) {
+    console.error(`check-contract: ${named ? `${named} is not a task service present here` : "no task service is present"}, so ${client.id} has nothing to run against.`);
+    return 2;
+  }
+  const contract = loadContract();
+  const result = await runE2e(client, service, contract, loadFacts(contract));
+  if (result.fatal) {
+    console.error(`check-contract: ${result.fatal}`);
+    return 2;
+  }
+  if (result.code === 0) console.log(`check-contract: ${client.id} works end to end against ${service.id}.`);
+  else console.error(`check-contract: ${client.id} failed end to end against ${service.id} (exit ${result.code}).`);
+  return result.code === 0 ? 0 : 1;
+}
+
 async function main() {
+  if (process.argv[2] === "--e2e") return e2eMain(process.argv.slice(3));
   const requested = process.argv.slice(2);
   const present = presentModules().filter((m) => m.taskApi);
   const unknown = requested.filter((id) => !present.some((m) => m.id === id));

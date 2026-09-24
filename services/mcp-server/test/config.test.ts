@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { ConfigError, loadConfig } from "../src/config.ts";
+import { ConfigError, DEVELOPMENT_VERSION, loadConfig, loadVersion } from "../src/config.ts";
 
 test("the defaults are the ones the README documents", () => {
   assert.deepEqual(loadConfig({}), { apiBaseUrl: "http://localhost:8080/", requestTimeoutMs: 10_000 });
@@ -19,4 +19,13 @@ test("the timeout is whole milliseconds, and nothing that merely looks like a nu
     assert.throws(() => loadConfig({ TASK_API_TIMEOUT_MS: bad }), ConfigError, bad);
   }
   assert.equal(loadConfig({ TASK_API_TIMEOUT_MS: "" }).requestTimeoutMs, 10_000);
+});
+
+test("the version is the release the image was built as, and a build that is not one says so", () => {
+  assert.equal(loadVersion({}), DEVELOPMENT_VERSION);
+  assert.equal(loadVersion({ MCP_SERVER_VERSION: "" }), DEVELOPMENT_VERSION);
+  assert.equal(loadVersion({ MCP_SERVER_VERSION: "1.2.0" }), "1.2.0");
+  assert.equal(loadVersion({ MCP_SERVER_VERSION: "1.2.0-rc.1+build.5" }), "1.2.0-rc.1+build.5");
+  for (const bad of ["v1.2.0", "1.2", "latest", "01.2.0", " 1.2.0"])
+    assert.throws(() => loadVersion({ MCP_SERVER_VERSION: bad }), ConfigError, bad);
 });

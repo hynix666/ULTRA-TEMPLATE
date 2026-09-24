@@ -9,7 +9,10 @@ import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
 import { createServer } from "../src/adapters/mcp.ts";
 import { GatewayError } from "../src/application/ports.ts";
 import type { TaskGateway } from "../src/application/ports.ts";
+import { nextStatuses, STATUSES } from "../src/domain/task.ts";
 import { fakeGateway, task } from "./fake-gateway.ts";
+
+const VERSION = "1.2.3-test";
 
 interface ToolCall {
   content: { type: string; text?: string }[];
@@ -18,7 +21,7 @@ interface ToolCall {
 
 async function connect(t: { after: (fn: () => Promise<void>) => void }, gateway: TaskGateway): Promise<Client> {
   const [clientEnd, serverEnd] = InMemoryTransport.createLinkedPair();
-  const server = createServer(gateway);
+  const server = createServer(gateway, { version: VERSION });
   const client = new Client({ name: "test-harness", version: "0.0.0" });
   await server.connect(serverEnd);
   await client.connect(clientEnd);
@@ -152,4 +155,17 @@ test("an API that cannot answer is reported with what was tried", async (t) => {
   const result = await client.callTool({ name: "list_tasks", arguments: {} });
   assert.equal(failed(result), true);
   assert.match(said(result), /no answer within 10000 ms/);
+});
+
+test("the server reports the version it was built as", async (t) => {
+  assert.equal((await connect(t, fakeGateway())).getServerVersion()?.version, VERSION);
+});
+
+test("the descriptions state the rules as the domain does: every legal move, and the first status", async (t) => {
+  const { tools } = await (await connect(t, fakeGateway())).listTools();
+  const move = tools.find((tool) => tool.name === "move_task")?.description ?? "";
+  const named = [...move.matchAll(/(\w+) → (\w+)/g)].map(([, from, to]) => `${from} → ${to}`).sort();
+  const legal = STATUSES.flatMap((from) => nextStatuses(from).map((to) => `${from} → ${to}`)).sort();
+  assert.deepEqual(named, legal);
+  assert.match(tools.find((tool) => tool.name === "create_task")?.description ?? "", new RegExp(`starts in the ${STATUSES[0]} status`));
 });

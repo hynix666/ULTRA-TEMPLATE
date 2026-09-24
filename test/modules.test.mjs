@@ -66,3 +66,28 @@ test("verify runs each module's checks from its manifest, and nothing else", asy
     assert.deepEqual(own, module.checks.map((c) => c.run.join(" ")), module.id);
   }
 });
+
+test("a module's end-to-end check names the task API it runs against, and runs against a service on its own toolchain first", async () => {
+  const { e2ePartner, validateManifest } = await import("../scripts/modules.mjs");
+  const base = { id: "client", toolchain: "node", checks: [{ name: "t", run: ["npm", "test"] }] };
+  assert.deepEqual(validateManifest({ ...base, e2e: { run: ["npm", "run", "e2e", "--", "{taskApi}"] } }), []);
+  assert.match(validateManifest({ ...base, e2e: { run: ["npm", "run", "e2e"] } }).join(), /must pass the task API's address as \{taskApi\}/);
+  assert.match(validateManifest({ ...base, e2e: { run: ["x", "{taskApi}"], when: "always" } }).join(), /`e2e` is \{"run": command\}/);
+  const go = { id: "go", toolchain: "go", taskApi: { run: ["api"] } };
+  const ts = { id: "ts", toolchain: "node", taskApi: { run: ["node", "main.ts"] } };
+  assert.equal(e2ePartner(base, [go, ts, base])?.id, "ts");
+  assert.equal(e2ePartner(base, [go, base])?.id, "go");
+  assert.equal(e2ePartner(base, [base]), null);
+});
+
+test("verify runs a client's end-to-end check when a task service is present", async () => {
+  const { execFileSync } = await import("node:child_process");
+  const { ROOT, e2ePartner, presentModules } = await import("../scripts/modules.mjs");
+  const plan = execFileSync(process.execPath, ["scripts/verify.mjs", "--dry-run", "--no-chassis"], { cwd: ROOT, encoding: "utf8" });
+  const present = presentModules();
+  for (const module of present.filter((m) => m.e2e)) {
+    const partner = e2ePartner(module, present);
+    const step = `${module.id}: end to end with ${partner?.id}\t.\tnode scripts/check-contract.mjs --e2e ${module.id} --service ${partner?.id}`;
+    assert.equal(plan.includes(step), partner !== null, module.id);
+  }
+});

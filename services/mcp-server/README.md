@@ -57,6 +57,15 @@ npm run verify    # import boundaries, type-check, tests
 
 The tests drive the server through a real MCP client over an in-memory transport pair, so a tool that is registered but unreachable — a bad schema, a handler that throws — fails here rather than in someone's editor.
 
+The tool descriptions state the rules from the domain's own table, which `scripts/check-facts.mjs` holds to `scripts/rules/task-rules.json`, so a model never reads a move the API refuses. `scripts/drive.ts` drives the server over stdio with the SDK's client where the tests cannot reach:
+
+```bash
+npm run e2e -- http://localhost:8080                        # every tool against a running task API
+npm run probe -- 1.2.0 -- docker run --rm -i mcp-server     # the image reports 1.2.0 and speaks the SDK's newest protocol
+```
+
+`node scripts/verify.mjs` runs the first against a task service of this project whenever one is present, and CI runs the second against the image it builds. The image reports the release it was built as (`--build-arg VERSION=…`, which `mcp-publish.yml` passes); a build without one reports `0.0.0-dev`, so it cannot be taken for a release.
+
 ## Publish
 
 `.github/workflows/mcp-publish.yml` publishes the image to GitHub Container Registry and `server.json` to the [MCP Registry](https://registry.modelcontextprotocol.io), where clients discover servers. It uses no stored token: the image is pushed with the run's `GITHUB_TOKEN`, and the registry trusts GitHub's OIDC identity for the `io.github.<owner>/` namespace. The image is built for `linux/amd64` and `linux/arm64`, each on a native runner, and published as one tag, so it runs natively on an Apple Silicon Mac. The two builds also stay in the registry as `<version>-amd64` and `<version>-arm64`. In a private repository the arm64 runner uses paid Actions minutes once the free allowance is spent.

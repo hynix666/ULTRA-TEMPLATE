@@ -168,7 +168,7 @@ test("the contract states every pair of statuses, legal or not, as the rules do"
     const body = JSON.parse(c.body || "null");
     if (body === null || Object.keys(body).join() !== "status" || !statuses.includes(body.status)) continue;
     const staged = (c.setup ?? []).filter((step) => step.path === c.path).map((step) => JSON.parse(step.body).status);
-    moves.set(`${staged.at(-1) ?? "todo"} → ${body.status}`, c.status);
+    moves.set(`${staged.at(-1) ?? statuses[0]} → ${body.status}`, c.status);
   }
   for (const from of statuses) {
     for (const to of statuses) {
@@ -176,6 +176,12 @@ test("the contract states every pair of statuses, legal or not, as the rules do"
       assert.equal(moves.get(`${from} → ${to}`), expected, `the move ${from} → ${to} should be a case answered ${expected}`);
     }
   }
+});
+
+test("a task the contract creates starts in the first status the rules list", () => {
+  const created = CONTRACT.cases.filter((c) => c.method === "POST" && c.path === "/api/tasks" && c.task);
+  assert.ok(created.length > 0);
+  for (const c of created) assert.equal(c.task.status, loadRules().statuses[0], c.name);
 });
 
 test("judge checks the task's fields and values, not only the status", () => {

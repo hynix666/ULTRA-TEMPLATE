@@ -87,7 +87,9 @@ jobs:
           # Image references must be lowercase; a GitHub owner need not be.
           IMAGE="ghcr.io/${OWNER,,}/ultra-template-mcp-server:$VERSION-$ARCH"
           echo "$GH_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
-          docker build --tag "$IMAGE" .
+          # The image reports the release it is (src/config.ts reads MCP_SERVER_VERSION); check that it does.
+          docker build --build-arg VERSION="$VERSION" --tag "$IMAGE" .
+          test "$(docker run --rm --entrypoint node "$IMAGE" -p process.env.MCP_SERVER_VERSION)" = "$VERSION"
           docker push "$IMAGE"
 
   publish:

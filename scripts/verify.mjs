@@ -22,7 +22,7 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
-import { available, checkNodeVersion, ModuleError, presentModules, REQUIREMENTS, ROOT, run, TOOLCHAINS } from "./modules.mjs";
+import { available, checkNodeVersion, e2ePartner, ModuleError, presentModules, REQUIREMENTS, ROOT, run, TOOLCHAINS } from "./modules.mjs";
 
 const { values: flags, positionals: requested } = parseArgs({
   allowPositionals: true,
@@ -94,6 +94,9 @@ function verifyModule(module) {
   // facts without serving them to the files that state them (ADR-0010).
   if (module.taskApi) step(`${module.id}: contract`, ["node", "scripts/check-contract.mjs", module.id]);
   if (module.facts) step(`${module.id}: facts`, ["node", "scripts/check-facts.mjs", module.id]);
+  // A client of the task API is driven against a real one, where a service is present to run it against.
+  const partner = module.e2e ? e2ePartner(module, present) : null;
+  if (partner) step(`${module.id}: end to end with ${partner.id}`, ["node", "scripts/check-contract.mjs", "--e2e", module.id, "--service", partner.id]);
 }
 
 let present;

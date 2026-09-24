@@ -214,13 +214,13 @@ jobs:
           { echo "| Module | Lines covered | Covered of total |"; echo "|---|---|---|"; node ../../scripts/coverage-summary.mjs mcp-server coverage/lcov.info; } >> "$GITHUB_STEP_SUMMARY"
       - name: The facts it repeats
         run: node ../../scripts/check-facts.mjs mcp-server
-      - name: Container image starts and speaks MCP
+      # The SDK's own client, over the image's stdin and stdout: it negotiates the SDK's newest protocol
+      # version, so none is written here, and the image must report the version it was built as.
+      - name: Container image reports its version and speaks MCP
         run: |
-          docker build --tag mcp-server:ci .
-          request='{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"ci","version":"0"}}}'
-          reply="$(echo "$request" | timeout 60 docker run --rm -i mcp-server:ci)"
-          echo "$reply"
-          echo "$reply" | grep -q '"serverInfo"'
+          built_as=0.0.0-ci
+          docker build --build-arg VERSION="$built_as" --tag mcp-server:ci .
+          timeout 120 npm run --silent probe -- "$built_as" -- docker run --rm -i mcp-server:ci
   # ultra:end mcp-server
 
   # ultra:begin py-service
@@ -237,7 +237,7 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version-file: .node-version
-      # uv is pinned once, in scripts/tools/tools.json; rule 16 holds it inside [tool.uv] required-version.
+      # uv is pinned once, in scripts/tools/tools.json; rule 17 holds it inside [tool.uv] required-version.
       - name: The pinned uv
         id: uv
         run: echo "version=$(node ../../scripts/tools.mjs version uv)" >> "$GITHUB_OUTPUT"

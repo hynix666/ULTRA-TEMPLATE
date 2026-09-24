@@ -68,8 +68,15 @@ const READS = { readOnlyHint: true, destructiveHint: false, openWorldHint: false
 // Creating twice makes two tasks, and moving twice is refused the second time: neither is idempotent.
 const WRITES = { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false } as const;
 
-export function createServer(gateway: TaskGateway): McpServer {
-  const server = new McpServer({ name: SERVER_NAME, version: "0.1.0" }, { capabilities: { tools: {} } });
+// A model reads the rules from the descriptions, so they are written from the domain's own statement of
+// them, which scripts/check-facts.mjs holds to scripts/rules/task-rules.json. Prose written by hand here
+// would be a second statement of the rules that nothing compares.
+const FIRST_STATUS = STATUSES[0];
+const LEGAL_MOVES = STATUSES.flatMap((from) => nextStatuses(from).map((to) => `${from} → ${to}`)).join(", ");
+
+/** The server, reporting `version` to every client that connects. */
+export function createServer(gateway: TaskGateway, { version }: { version: string }): McpServer {
+  const server = new McpServer({ name: SERVER_NAME, version }, { capabilities: { tools: {} } });
 
   server.registerTool(
     "list_tasks",
@@ -107,7 +114,7 @@ export function createServer(gateway: TaskGateway): McpServer {
     "create_task",
     {
       title: "Create a task",
-      description: "Create a task. It starts in the todo status.",
+      description: `Create a task. It starts in the ${FIRST_STATUS} status.`,
       inputSchema: z.object({ title: z.string().max(MAX_TITLE_LENGTH).describe("What the task is, in a line") }),
       outputSchema: z.object({ task: taskOutput }),
       annotations: WRITES,
@@ -123,7 +130,7 @@ export function createServer(gateway: TaskGateway): McpServer {
     "move_task",
     {
       title: "Move a task",
-      description: `Move a task to another status. Legal moves: todo → in_progress → done, and in_progress → todo.`,
+      description: `Move a task to another status. Legal moves: ${LEGAL_MOVES}. Any other is refused.`,
       inputSchema: z.object({
         id: z.string().describe("The id of the task, as list_tasks reports it"),
         status: z.enum(STATUSES).describe("The status to move it to"),
