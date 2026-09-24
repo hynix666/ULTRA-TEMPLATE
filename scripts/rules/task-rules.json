@@ -1,5 +1,5 @@
 {
-  "$comment": "The task rules, stated once. Every module that repeats them is held to this file: the task services through the move cases in scripts/contract/tasks-api.json, and the MCP server, the web app and the library by scripts/check-rules.mjs, which runs each module's own `rules` script and compares what it prints. Change a rule here first, then in every module.",
+  "$comment": "The task rules, stated once. Every module that repeats them is held to this file: the task services through the move cases in scripts/contract/tasks-api.json, and the MCP server, the web app and the library by scripts/check-facts.mjs, which runs each module's own `facts` script and compares what it prints. Change a rule here first, then in every module.",
   "statuses": ["todo", "in_progress", "done"],
   "transitions": {
     "todo": ["in_progress"],

@@ -41,7 +41,7 @@ func Serve(ctx context.Context, listener net.Listener, shutdownTimeout time.Dura
 	served := make(chan error, 1)
 
 	go func() {
-		log.Info("listening", "addr", listener.Addr().String())
+		log.Info("listening", "port", port(listener), "shutdownTimeoutMs", float64(shutdownTimeout)/float64(time.Millisecond))
 		served <- server.Serve(listener)
 	}()
 
@@ -65,4 +65,13 @@ func Serve(ctx context.Context, listener net.Listener, shutdownTimeout time.Dura
 	log.Info("stopped")
 
 	return nil
+}
+
+// port is the TCP port listener accepts on: PORT's value in effect, which the listening line reports.
+func port(listener net.Listener) int {
+	if addr, ok := listener.Addr().(*net.TCPAddr); ok {
+		return addr.Port
+	}
+
+	return 0
 }

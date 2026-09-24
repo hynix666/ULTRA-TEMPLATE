@@ -127,7 +127,7 @@ Each toolchain version is pinned once, in the file named beside it above, so the
 - `scripts/check-contract.mjs` — holds every task service to the one API contract, whose cases are in `scripts/contract/` beside the OpenAPI document it holds to them.
 <!-- ultra:end go-service|ts-service|py-service -->
 <!-- ultra:begin mcp-server|web|ts-library -->
-- `scripts/check-rules.mjs` — holds every module that repeats the task rules without serving them to `scripts/rules/task-rules.json`.
+- `scripts/check-facts.mjs` — holds every module that repeats a fact without serving it (the task rules, the API's default port) to the file that states it.
 <!-- ultra:end mcp-server|web|ts-library -->
 <!-- ultra:begin go-service -->
 - `services/api-go/` — Go task API in Clean Architecture layers. `go run ./cmd/api` there serves it on port 8080. [README](services/api-go/README.md)

@@ -73,7 +73,7 @@
       }
     },
     "responses": {
-      "BadRequest": { "description": "The body is not one JSON object of the documented fields, or is over 1 MiB", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+      "BadRequest": { "description": "The body is not one JSON object of the documented fields, or is larger than x-maxBodyBytes", "x-maxBodyBytes": 1048576, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
       "NotFound": { "description": "No task has this id", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
     },
     "schemas": {

@@ -212,8 +212,8 @@ jobs:
         run: |
           npm run --silent coverage > /dev/null
           { echo "| Module | Lines covered | Covered of total |"; echo "|---|---|---|"; node ../../scripts/coverage-summary.mjs mcp-server coverage/lcov.info; } >> "$GITHUB_STEP_SUMMARY"
-      - name: The task rules
-        run: node ../../scripts/check-rules.mjs mcp-server
+      - name: The facts it repeats
+        run: node ../../scripts/check-facts.mjs mcp-server
       - name: Container image starts and speaks MCP
         run: |
           docker build --tag mcp-server:ci .
@@ -297,8 +297,8 @@ jobs:
         run: |
           npm run --silent coverage > /dev/null
           { echo "| Module | Lines covered | Covered of total |"; echo "|---|---|---|"; node ../../scripts/coverage-summary.mjs web coverage/lcov.info; } >> "$GITHUB_STEP_SUMMARY"
-      - name: The task rules
-        run: node ../../scripts/check-rules.mjs web
+      - name: The facts it repeats
+        run: node ../../scripts/check-facts.mjs web
   # ultra:end web
 
   # ultra:begin ts-library
@@ -324,8 +324,8 @@ jobs:
         run: |
           npm run --silent coverage > /dev/null
           { echo "| Module | Lines covered | Covered of total |"; echo "|---|---|---|"; node ../../scripts/coverage-summary.mjs ts-library coverage/lcov.info; } >> "$GITHUB_STEP_SUMMARY"
-      - name: The task rules
-        run: node ../../scripts/check-rules.mjs ts-library
+      - name: The facts it repeats
+        run: node ../../scripts/check-facts.mjs ts-library
   # ultra:end ts-library
 
   # ultra:begin architecture

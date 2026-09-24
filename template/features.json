@@ -21,7 +21,7 @@
     "mcp-server": {
       "summary": "MCP server on the Model Context Protocol SDK: tools over stdio, the same layers, driven in tests by a real client",
       "describes": "an MCP server that gives an AI assistant the task API's tools",
-      "paths": ["services/mcp-server", ".claude/skills/add-mcp-tool", ".github/workflows/mcp-publish.yml", "scripts/rules", "scripts/check-rules.mjs", "test/check-rules.test.mjs"]
+      "paths": ["services/mcp-server", ".claude/skills/add-mcp-tool", ".github/workflows/mcp-publish.yml", "scripts/rules", "scripts/contract", "scripts/check-facts.mjs", "test/check-facts.test.mjs"]
     },
     "py-service": {
       "summary": "Python HTTP service on the standard library: pure domain, WSGI transport, layer rules enforced by an ast-based check",
@@ -31,12 +31,12 @@
     "web": {
       "summary": "React + Vite app in feature folders, import boundaries checked, component tests",
       "describes": "a React web app",
-      "paths": ["apps/web", "scripts/rules", "scripts/check-rules.mjs", "test/check-rules.test.mjs"]
+      "paths": ["apps/web", "scripts/rules", "scripts/contract", "scripts/check-facts.mjs", "test/check-facts.test.mjs"]
     },
     "ts-library": {
       "summary": "TypeScript library for npm: exports map, publint and type checks on the packed tarball, trusted publishing",
       "describes": "a TypeScript library for npm",
-      "paths": ["packages/ts-library", "scripts/rules", "scripts/check-rules.mjs", "test/check-rules.test.mjs"]
+      "paths": ["packages/ts-library", "scripts/rules", "scripts/check-facts.mjs", "test/check-facts.test.mjs"]
     },
     "architecture": {
       "summary": "LikeC4 architecture-as-code: model rules run as tests, optional GitHub Pages site",

@@ -200,12 +200,13 @@ test("every module's directory is owned by exactly one feature, the one its modu
 });
 
 test("removed paths cover unselected features and template-only files", () => {
-  const removed = removedPaths(loadManifest(), new Set(["web"]));
+  const removed = removedPaths(loadManifest(), new Set(["ts-library"]));
   assert.ok(removed.includes("template") && removed.includes("services/api-go"));
-  assert.ok(!removed.includes("apps/web"));
+  assert.ok(!removed.includes("packages/ts-library"));
   // A path several features own goes only when none of its owners is selected.
-  assert.ok(removed.includes("scripts/contract"), "no task service selected");
+  assert.ok(removed.includes("scripts/contract"), "nothing that serves or calls the task API is selected");
   assert.ok(!removedPaths(loadManifest(), new Set(["py-service"])).includes("scripts/contract"), "one owner selected");
+  assert.ok(!removedPaths(loadManifest(), new Set(["web"])).includes("scripts/contract"), "a client of the API keeps the contract its facts are held to");
 });
 
 test("in-place init removes an unselected module whole, ignored files included", (t) => {

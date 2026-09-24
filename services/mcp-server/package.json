@@ -13,7 +13,7 @@
     "coverage": "node -e \"require('node:fs').mkdirSync('coverage', { recursive: true })\" && node --test --experimental-test-coverage --test-coverage-exclude=\"test/**\" --test-reporter=lcov --test-reporter-destination=coverage/lcov.info \"test/**/*.test.ts\"",
     "lint": "biome ci .",
     "verify": "npm run lint && npm run check:boundaries && npm run typecheck && npm test",
-    "rules": "node scripts/print-rules.ts"
+    "facts": "node scripts/print-facts.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/server": "^2.0.0",

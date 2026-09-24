@@ -2,6 +2,7 @@ package entity_test
 
 import (
 	"errors"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -92,5 +93,13 @@ func TestParseStatus(t *testing.T) {
 
 	if _, err := entity.ParseStatus("DONE"); !errors.Is(err, entity.ErrUnknownStatus) {
 		t.Fatalf("ParseStatus(DONE) error = %v, want ErrUnknownStatus", err)
+	}
+}
+
+func TestTitleTooLongStatesTheLimit(t *testing.T) {
+	t.Parallel()
+
+	if limit := strconv.Itoa(entity.MaxTitleLength); !strings.Contains(entity.ErrTitleTooLong.Error(), limit) {
+		t.Fatalf("ErrTitleTooLong = %q, want it to state the limit %s", entity.ErrTitleTooLong, limit)
 	}
 }

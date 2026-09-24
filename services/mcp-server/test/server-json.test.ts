@@ -33,8 +33,22 @@ test("the package is the image this repository builds, tagged with the manifest'
 
 test("every advertised variable is one the server reads, with the default it really uses", () => {
   const advertised = manifest.packages[0]?.environmentVariables ?? [];
-  const defaults = loadConfig({});
-  assert.deepEqual(advertised.map((variable) => variable.name).sort(), ["TASK_API_TIMEOUT_MS", "TASK_API_URL"]);
-  assert.equal(new URL(advertised.find((v) => v.name === "TASK_API_URL")?.default ?? "").toString(), defaults.apiBaseUrl);
-  assert.equal(Number(advertised.find((v) => v.name === "TASK_API_TIMEOUT_MS")?.default), defaults.requestTimeoutMs);
+  // The variables loadConfig reads, recorded as it reads them rather than listed here a second time.
+  const read = new Set<string>();
+  const recording = new Proxy<Record<string, string | undefined>>(
+    {},
+    {
+      get: (_target, key) => {
+        if (typeof key === "string") read.add(key);
+        return undefined;
+      },
+    },
+  );
+  const defaults = loadConfig(recording);
+  assert.deepEqual(advertised.map((variable) => variable.name).sort(), [...read].sort());
+  // Writing an advertised default out must change nothing.
+  for (const { name, default: value } of advertised) {
+    if (value === undefined) continue;
+    assert.deepEqual(loadConfig({ [name]: value }), defaults, `${name}=${value} is not the default the server applies`);
+  }
 });

@@ -1,12 +1,57 @@
 {
-  "$comment": "The task API contract every task service answers identically, checked over HTTP by scripts/check-contract.mjs. `{id}` is replaced by a task created for that case, in the todo status. A case lists the status and, where it is part of the contract, the shape of the answer. A case may list `setup` requests, sent first and judged on their status alone, to bring its task to the state the case is about; every one of the nine pairs of statuses is below, the three legal moves and the six refusals, as scripts/rules/task-rules.json states them. Every answer carries an X-Request-Id: a usable one sent (`requestId: echo`) is echoed and an unsafe one replaced (`requestId: replaced`), and every answered request is logged once to stdout as one JSON line; `beforeService` marks the one case a language's own HTTP server may answer before the service sees it. Paths that are not canonical (`//api/tasks`, `/api/../api/tasks`) are left out on purpose: each language's standard server cleans or rejects them before the service sees the request.",
+  "$comment": "The task API contract every task service answers identically, checked against each task service present by scripts/check-contract.mjs: over HTTP for `cases`, and by starting the service for `config`. The MCP server and the web app call this API, so they keep the contract too, and scripts/check-facts.mjs holds the port they call by default to it. `limits` states what every service bounds, once: a case refers to a limit or a task rule as { \"ref\": \"limits.maxBodyBytes\", \"plus\": 1 } rather than restating it, `times` repeats a string, and `padTo` fills a body with trailing spaces to an exact size in bytes, so each bound is tested at its value and one past it. `{id}` is replaced by a task created for that case, in the todo status. A case lists the status and, where it is part of the contract, the shape of the answer. A case may list `setup` requests, sent first and judged on their status alone, to bring its task to the state the case is about; every one of the nine pairs of statuses is below, the three legal moves and the six refusals, as scripts/rules/task-rules.json states them. Every answer carries an X-Request-Id: a usable one sent (`requestId: echo`) is echoed and an unsafe one replaced (`requestId: replaced`), and every answered request is logged once to stdout as one JSON line; `beforeService` marks the one case a language's own HTTP server may answer before the service sees it. Paths that are not canonical (`//api/tasks`, `/api/../api/tasks`) are left out on purpose: each language's standard server cleans or rejects them before the service sees the request.",
+  "limits": {
+    "$comment": "What every task service bounds, stated once. Cases refer to these values instead of restating them, checkSpec holds the OpenAPI document to them, and each service's own constant is held to them by the cases at each bound and one past it. A request id is any run of `requestId.characters`, as a regular-expression character class, at most `maxLength` long.",
+    "maxBodyBytes": 1048576,
+    "requestId": { "characters": "A-Za-z0-9._-", "maxLength": 128 }
+  },
+  "startup": {
+    "$comment": "How a task service reports that it started, or that it refused its configuration. The listening line carries every variable in `config` under its `reportedAs` field, with the value in effect. A refused configuration writes one `refused` line, whose `error` names the variable, and exits with `exitCode`. `ready` is the request every check polls until the service answers it.",
+    "ready": { "method": "GET", "path": "/healthz", "status": 200 },
+    "listening": { "level": "info", "msg": "listening" },
+    "refused": { "level": "error", "msg": "invalid configuration", "exitCode": 2 }
+  },
+  "config": {
+    "$comment": "Every environment variable a task service reads. An unset or empty variable reads as its default. Each value under `accept` starts the service with `effective` in effect; each under `refuse` is refused as `startup` says. `{port}` is a free port, and `{port:fullwidth}` and `{port:arabic-indic}` write it in another script's digits, which Go's strconv.Atoi refuses and so every service must. The default of a variable that `binds` a port is checked by CI's image probe only, so no check binds that port on a developer's machine. SHUTDOWN_TIMEOUT takes Go's duration syntax, up to the longest duration Go can hold, and is reported in milliseconds.",
+    "PORT": {
+      "reportedAs": "port",
+      "binds": true,
+      "default": { "value": "8080", "effective": 8080 },
+      "accept": [
+        { "value": "{port}", "effective": "{port}" },
+        { "value": "+{port}", "effective": "{port}" },
+        { "value": "0{port}", "effective": "{port}" }
+      ],
+      "refuse": ["0", "-1", "65536", "99999999999999999999", "{port}.0", " {port}", "{port} ", "{port}\n", "0x1F90", "8e3", "8_080", "http", "{port:fullwidth}", "{port:arabic-indic}"]
+    },
+    "SHUTDOWN_TIMEOUT": {
+      "reportedAs": "shutdownTimeoutMs",
+      "default": { "value": "10s", "effective": 10000 },
+      "accept": [
+        { "value": "1m30s", "effective": 90000 },
+        { "value": "1.5s", "effective": 1500 },
+        { "value": ".5s", "effective": 500 },
+        { "value": "1.s", "effective": 1000 },
+        { "value": "+2s", "effective": 2000 },
+        { "value": "500ms", "effective": 500 },
+        { "value": "250us", "effective": 0.25 },
+        { "value": "250\u00b5s", "effective": 0.25 },
+        { "value": "250\u03bcs", "effective": 0.25 },
+        { "value": "400ns", "effective": 0.0004 },
+        { "value": "1h2m3.5s", "effective": 3723500 },
+        { "value": "2562047h", "effective": 9223369200000 }
+      ],
+      "refuse": ["0", "0s", "-0s", "-1s", "10", "1d", "10S", "10sec", "10 s", " 10s", "10s\n", "s", ".s", "1..5s", "1.5.5s", "1e3s", "\uff11\uff10s", "2562048h"]
+    }
+  },
   "cases": [
     { "name": "health", "method": "GET", "path": "/healthz", "status": 200, "json": { "status": "ok" } },
     { "name": "health answers HEAD like GET", "method": "HEAD", "path": "/healthz", "status": 200 },
     { "name": "health refuses other methods", "method": "POST", "path": "/healthz", "status": 405, "error": true },
     { "name": "a usable request id is echoed", "method": "GET", "path": "/healthz", "headers": { "X-Request-Id": "contract.echo-1_A" }, "requestId": "echo", "status": 200 },
     { "name": "a request id with a space is replaced", "method": "GET", "path": "/healthz", "headers": { "X-Request-Id": "has space" }, "requestId": "replaced", "status": 200 },
-    { "name": "a request id over 128 characters is replaced", "method": "GET", "path": "/healthz", "headers": { "X-Request-Id": { "repeat": "a", "times": 129 } }, "requestId": "replaced", "status": 200 },
+    { "name": "a request id of the longest length is echoed", "method": "GET", "path": "/healthz", "headers": { "X-Request-Id": { "repeat": "a", "times": { "ref": "limits.requestId.maxLength" } } }, "requestId": "echo", "status": 200 },
+    { "name": "a request id one character over the longest is replaced", "method": "GET", "path": "/healthz", "headers": { "X-Request-Id": { "repeat": "a", "times": { "ref": "limits.requestId.maxLength", "plus": 1 } } }, "requestId": "replaced", "status": 200 },
 
     { "name": "list", "method": "GET", "path": "/api/tasks", "status": 200, "array": true },
     { "name": "list answers HEAD like GET", "method": "HEAD", "path": "/api/tasks", "status": 200 },
@@ -16,11 +61,12 @@
 
     { "name": "create", "method": "POST", "path": "/api/tasks", "body": "{\"title\":\"  Write it  \"}", "status": 201, "task": { "title": "Write it", "status": "todo" } },
     { "name": "create reads JSON whatever the content type", "method": "POST", "path": "/api/tasks", "contentType": "text/plain", "body": "{\"title\":\"plain\"}", "status": 201 },
-    { "name": "create counts code points, not bytes", "method": "POST", "path": "/api/tasks", "body": { "title": { "repeat": "🙂", "times": 200 } }, "status": 201 },
+    { "name": "create takes the longest title", "method": "POST", "path": "/api/tasks", "body": { "title": { "repeat": "a", "times": { "ref": "rules.maxTitleLength" } } }, "status": 201 },
+    { "name": "create counts code points, not bytes", "method": "POST", "path": "/api/tasks", "body": { "title": { "repeat": "🙂", "times": { "ref": "rules.maxTitleLength" } } }, "status": 201 },
     { "name": "create refuses an empty title", "method": "POST", "path": "/api/tasks", "body": "{\"title\":\"   \"}", "status": 422, "error": true },
     { "name": "create reads a missing title as empty", "method": "POST", "path": "/api/tasks", "body": "{}", "status": 422, "error": true },
     { "name": "create reads a null title as empty", "method": "POST", "path": "/api/tasks", "body": "{\"title\":null}", "status": 422, "error": true },
-    { "name": "create refuses a 201-character title", "method": "POST", "path": "/api/tasks", "body": { "title": { "repeat": "a", "times": 201 } }, "status": 422, "error": true },
+    { "name": "create refuses a title one character over the longest", "method": "POST", "path": "/api/tasks", "body": { "title": { "repeat": "a", "times": { "ref": "rules.maxTitleLength", "plus": 1 } } }, "status": 422, "error": true },
     { "name": "create refuses a title that is not a string", "method": "POST", "path": "/api/tasks", "body": "{\"title\":7}", "status": 400, "error": true },
     { "name": "create refuses an undocumented field", "method": "POST", "path": "/api/tasks", "body": "{\"title\":\"a\",\"x\":1}", "status": 400, "error": true },
     { "name": "create refuses an empty body", "method": "POST", "path": "/api/tasks", "body": "", "status": 400, "error": true },
@@ -28,7 +74,8 @@
     { "name": "create refuses JSON null", "method": "POST", "path": "/api/tasks", "body": "null", "status": 400, "error": true },
     { "name": "create refuses text after the object", "method": "POST", "path": "/api/tasks", "body": "{\"title\":\"a\"} x", "status": 400, "error": true },
     { "name": "create refuses two objects", "method": "POST", "path": "/api/tasks", "body": "{\"title\":\"a\"}{\"title\":\"b\"}", "status": 400, "error": true },
-    { "name": "create refuses a body over 1 MiB", "method": "POST", "path": "/api/tasks", "body": { "title": { "repeat": "a", "times": 1048576 } }, "status": 400, "error": true },
+    { "name": "create takes a body of the largest size", "method": "POST", "path": "/api/tasks", "body": "{\"title\":\"a\"}", "padTo": { "ref": "limits.maxBodyBytes" }, "status": 201 },
+    { "name": "create refuses a body one byte over the largest size", "method": "POST", "path": "/api/tasks", "body": "{\"title\":\"a\"}", "padTo": { "ref": "limits.maxBodyBytes", "plus": 1 }, "status": 400, "error": true },
 
     { "name": "get", "method": "GET", "path": "/api/tasks/{id}", "status": 200, "task": { "status": "todo" } },
     { "name": "get answers HEAD like GET", "method": "HEAD", "path": "/api/tasks/{id}", "status": 200 },

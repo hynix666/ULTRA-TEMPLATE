@@ -55,8 +55,11 @@ export const REQUIREMENTS = {
   },
 };
 
-/** The facts a module may say it repeats; scripts/check-rules.mjs compares each with its declaration. */
-export const FACTS = ["statuses", "transitions", "maxTitleLength"];
+/**
+ * The facts a module may say it repeats. Each is stated in one file, and scripts/check-facts.mjs compares
+ * a module's copy with it; test/check-facts.test.mjs holds this list to the facts those files state.
+ */
+export const FACTS = ["statuses", "transitions", "maxTitleLength", "apiDefaultPort"];
 export const IMAGE_PROBES = ["http", "mcp"];
 
 export class ModuleError extends Error {}

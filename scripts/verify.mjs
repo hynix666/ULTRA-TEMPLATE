@@ -91,9 +91,9 @@ function verifyModule(module) {
   }
   for (const spec of module.checks) check(module, cwd, spec);
   // A task service is held to the one contract all of them share (ADR-0008), and a module that repeats
-  // the task facts without serving them to their one statement (ADR-0010).
+  // facts without serving them to the files that state them (ADR-0010).
   if (module.taskApi) step(`${module.id}: contract`, ["node", "scripts/check-contract.mjs", module.id]);
-  if (module.facts) step(`${module.id}: task rules`, ["node", "scripts/check-rules.mjs", module.id]);
+  if (module.facts) step(`${module.id}: facts`, ["node", "scripts/check-facts.mjs", module.id]);
 }
 
 let present;

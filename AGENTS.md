@@ -66,7 +66,7 @@ The LikeC4 model in `architecture/model/` describes the system. Update it in the
 <!-- ultra:end architecture -->
 
 <!-- ultra:begin go-service|ts-service|py-service -->
-Every task service in this repository answers the same routes with the same status codes, reads the same configuration variables, answers every request with an `X-Request-Id` and logs it as the same one JSON line. `scripts/check-contract.mjs` holds each one to the cases in `scripts/contract/tasks-api.json`, and holds `scripts/contract/openapi.json` to those cases; change the contract there first, then every service, never one service alone.
+Every task service in this repository answers the same routes with the same status codes, reads the same configuration variables, answers every request with an `X-Request-Id` and logs it as the same one JSON line. `scripts/check-contract.mjs` holds each one to the cases in `scripts/contract/tasks-api.json`, and holds `scripts/contract/openapi.json` to those cases; change the contract there first, then every service, never one service alone. The same file declares the limits (body size, request id), each variable's default and the values it must accept or refuse, and the line a service logs when it starts or refuses its configuration: a case refers to a limit (`{ "ref": "limits.maxBodyBytes", "plus": 1 }`) and never restates it, and `check-contract` starts each service once per configuration value.
 <!-- ultra:end go-service|ts-service|py-service -->
 <!-- ultra:begin go-service|ts-service|py-service|mcp-server|web|ts-library -->
 The task rules (the statuses, the legal moves, the longest title) are stated once, in `scripts/rules/task-rules.json`. Change a rule there first, then in every module that repeats it ([ADR-0010](docs/adr/0010-one-statement-of-the-task-rules.md)).
@@ -75,7 +75,7 @@ The task rules (the statuses, the legal moves, the longest title) are stated onc
 The contract's move cases state every pair of statuses as that file does, so a task service is held to the rules over HTTP.
 <!-- ultra:end go-service|ts-service|py-service -->
 <!-- ultra:begin mcp-server|web|ts-library -->
-A module that repeats the rules without serving them prints its own table with `npm run rules`, and `scripts/check-rules.mjs` compares it with the file.
+A module that repeats a fact without serving it (the task rules, the port a task service listens on by default) prints its copies with `npm run facts`, and `scripts/check-facts.mjs` compares them with the files that state them.
 <!-- ultra:end mcp-server|web|ts-library -->
 <!-- ultra:begin ts-service|mcp-server|web|ts-library|architecture -->
 Every Node module lints and formats with Biome: `npm run lint` checks both, and `npx biome format --write .` in the module fixes the layout. A rule is switched off only in the module's `biome.jsonc`, with the reason beside it ([ADR-0012](docs/adr/0012-lint-and-format-typescript-with-biome.md)).

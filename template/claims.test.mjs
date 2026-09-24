@@ -25,7 +25,7 @@ const LEDGER = {
       "scripts/contract/openapi.json",
     ],
   },
-  "One statement of the rules.": { paths: ["scripts/rules/task-rules.json", "scripts/check-rules.mjs", "test/check-rules.test.mjs"] },
+  "One statement of the rules.": { paths: ["scripts/rules/task-rules.json", "scripts/check-facts.mjs", "test/check-facts.test.mjs"] },
   "A feature-sliced web app and a publishable library": {
     paths: ["apps/web/scripts/check-boundaries.mjs", "packages/ts-library/scripts/check-install.mjs"],
   },

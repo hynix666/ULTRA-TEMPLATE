@@ -3,11 +3,33 @@
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import { test } from "node:test";
-import { checkLogs, checkSpec, encodeBody, judge, loadCases, loadSpec, runCases } from "../scripts/check-contract.mjs";
+import {
+  checkConfig,
+  checkImage,
+  checkLogs,
+  checkSpec,
+  configCases,
+  configEnv,
+  encodeBody,
+  expectedReport,
+  fillPort,
+  judge,
+  judgeStartup,
+  loadCases,
+  loadContract,
+  loadFacts,
+  loadSpec,
+  requestIdPattern,
+  resolveRef,
+  runCases,
+} from "../scripts/check-contract.mjs";
 import { loadRules } from "../scripts/rules/load.mjs";
 
-// The moves the fake service allows unless `mistakes.moves` says otherwise.
-const MOVES = { todo: ["in_progress"], in_progress: ["todo", "done"], done: [] };
+const CONTRACT = loadContract();
+const FACTS = loadFacts(CONTRACT);
+// The moves the fake service allows unless `mistakes.moves` says otherwise: the rules' own.
+const MOVES = loadRules().transitions;
+const REQUEST_ID = requestIdPattern(CONTRACT.limits);
 
 /** A minimal task service that is right about everything except what `mistakes` says. */
 function fakeService(t, mistakes = {}) {
@@ -18,7 +40,7 @@ function fakeService(t, mistakes = {}) {
     req.on("data", (chunk) => (raw += chunk));
     req.on("end", () => {
       const sent = req.headers["x-request-id"];
-      const id = mistakes.alwaysGenerate || typeof sent !== "string" || !/^[A-Za-z0-9._-]{1,128}$/.test(sent) ? `gen-${++generated}` : sent;
+      const id = mistakes.alwaysGenerate || typeof sent !== "string" || !REQUEST_ID.test(sent) ? `gen-${++generated}` : sent;
       const send = (status, body) => {
         const headers = { "content-type": mistakes.textErrors && status >= 400 ? "text/plain" : "application/json" };
         if (!mistakes.noRequestId) headers["x-request-id"] = id;
@@ -159,9 +181,9 @@ test("the contract states every pair of statuses, legal or not, as the rules do"
 test("judge checks the task's fields and values, not only the status", () => {
   const answer = (body) => ({ status: 201, type: "application/json", requestId: "r1", text: JSON.stringify(body) });
   const wanted = { status: 201, task: { status: "todo" } };
-  assert.deepEqual(judge(wanted, answer({ id: "1", title: "a", status: "todo", createdAt: "x", updatedAt: "x" })), []);
-  assert.match(judge(wanted, answer({ id: "1", title: "a", status: "todo" })).join(), /task fields/);
-  assert.match(judge(wanted, answer({ id: "1", title: "a", status: "done", createdAt: "x", updatedAt: "x" })).join(), /status "done"/);
+  assert.deepEqual(judge(wanted, answer({ id: "1", title: "a", status: "todo", createdAt: "x", updatedAt: "x" }), FACTS), []);
+  assert.match(judge(wanted, answer({ id: "1", title: "a", status: "todo" }), FACTS).join(), /task fields/);
+  assert.match(judge(wanted, answer({ id: "1", title: "a", status: "done", createdAt: "x", updatedAt: "x" }), FACTS).join(), /status "done"/);
 });
 
 test("the committed cases are well formed and each name is unique", () => {
@@ -179,16 +201,62 @@ test("the committed cases are well formed and each name is unique", () => {
     }
   }
   // Large bodies are described, not stored: the file stays small and reviewable.
-  assert.equal(JSON.parse(encodeBody({ title: { repeat: "ab", times: 3 } })).title, "ababab");
+  const facts = { rules: { maxTitleLength: 3 }, limits: { maxBodyBytes: 20 } };
+  assert.equal(JSON.parse(encodeBody({ title: { repeat: "ab", times: { ref: "rules.maxTitleLength" } } }, facts)).title, "ababab");
+  assert.equal(encodeBody('{"a":1}', facts, { ref: "limits.maxBodyBytes" }), `{"a":1}${" ".repeat(13)}`);
+  assert.throws(() => encodeBody("x".repeat(30), facts, { ref: "limits.maxBodyBytes" }), /already 30 bytes, more than the 20/);
+});
+
+/** Every count the contract states, as [where, value]: a `times` inside a body or a header, and a `padTo`. */
+function counts(cases) {
+  const found = [];
+  const visit = (where, value) => {
+    if (value === null || typeof value !== "object") return;
+    if ("repeat" in value) found.push([`${where} times`, value.times]);
+    else for (const [key, inner] of Object.entries(value)) visit(`${where}.${key}`, inner);
+  };
+  for (const c of cases) {
+    visit(`"${c.name}" body`, c.body);
+    visit(`"${c.name}" headers`, c.headers);
+    if ("padTo" in c) found.push([`"${c.name}" padTo`, c.padTo]);
+  }
+  return found;
+}
+
+test("every count in the contract refers to the limit or rule it tests, and no case name restates one", () => {
+  const found = counts(CONTRACT.cases);
+  assert.ok(found.length >= 6, `${found.length} counts`);
+  for (const [where, value] of found) {
+    assert.ok(value !== null && typeof value === "object" && typeof value.ref === "string", `${where} is ${JSON.stringify(value)}, not a { "ref": … }`);
+    assert.equal(typeof resolveRef(value, FACTS), "number", where);
+  }
+  for (const c of CONTRACT.cases) assert.doesNotMatch(c.name, /\d/, `the case name "${c.name}" states a number`);
+  // Each bound is tested at its value and one past it.
+  const refs = found.map(([, value]) => `${value.ref}${value.plus ? `+${value.plus}` : ""}`);
+  for (const bound of ["limits.maxBodyBytes", "limits.requestId.maxLength", "rules.maxTitleLength"]) {
+    assert.ok(refs.includes(bound) && refs.includes(`${bound}+1`), `${bound} is not tested at its value and one past it`);
+  }
+});
+
+test("a count written as a number, or referring to nothing, is refused", () => {
+  assert.throws(() => resolveRef(201, FACTS), /a count must be \{ "ref": … \}, not 201/);
+  assert.throws(() => resolveRef({ ref: "limits.maxBodyMegabytes" }, FACTS), /limits\.maxBodyMegabytes names no number/);
+  assert.equal(resolveRef({ ref: "rules.maxTitleLength", plus: 1 }, FACTS), loadRules().maxTitleLength + 1);
+  assert.throws(() => encodeBody({ title: { repeat: "a", times: 3 } }, FACTS), /a count must be/);
+});
+
+test("the request id pattern comes from the limits", () => {
+  const pattern = requestIdPattern({ requestId: { characters: "a-z", maxLength: 3 } });
+  assert.ok(pattern.test("abc") && !pattern.test("abcd") && !pattern.test("ab1") && !pattern.test(""));
 });
 
 test("the OpenAPI document agrees with the contract cases and the task rules", () => {
-  assert.deepEqual(checkSpec(loadSpec(), loadCases(), loadRules()), []);
+  assert.deepEqual(checkSpec(loadSpec(), CONTRACT, loadRules()), []);
 });
 
 test("every way the OpenAPI document can disagree is reported", () => {
   const spec = () => structuredClone(loadSpec());
-  const cases = loadCases();
+  const cases = CONTRACT;
   const rules = loadRules();
 
   // A case answered with a status the document does not list.
@@ -202,7 +270,7 @@ test("every way the OpenAPI document can disagree is reported", () => {
   assert.match(checkSpec(unexercised, cases, rules).join("\n"), /lists 500 for GET \/api\/tasks, which no case exercises/);
 
   // A method a path does not list must be answered 405.
-  const extra = [...cases, { name: "delete a task", method: "DELETE", path: "/api/tasks/{id}", status: 204 }];
+  const extra = { ...CONTRACT, cases: [...CONTRACT.cases, { name: "delete a task", method: "DELETE", path: "/api/tasks/{id}", status: 204 }] };
   assert.match(checkSpec(spec(), extra, rules).join("\n"), /case "delete a task" sends DELETE to \/api\/tasks\/\{id\}, which the document does not list, and expects 204 rather than 405/);
 
   // The task's fields are the ones every service answers with.
@@ -216,5 +284,122 @@ test("every way the OpenAPI document can disagree is reported", () => {
   assert.match(checkSpec(statuses, cases, rules).join("\n"), /Status enum is \["todo","done"\], expected \["todo","in_progress","done"\]/);
   const title = spec();
   title.components.schemas.CreateTask.properties.title.maxLength = 100;
-  assert.match(checkSpec(title, cases, rules).join("\n"), /CreateTask title maxLength is 100, expected 200/);
+  assert.match(checkSpec(title, cases, rules).join("\n"), new RegExp(`CreateTask title maxLength is 100, expected ${rules.maxTitleLength}`));
+
+  // The request id pattern and the body limit are the contract's.
+  const id = spec();
+  id.components.headers.RequestId.schema.pattern = "^[A-Za-z0-9]{1,64}$";
+  assert.match(checkSpec(id, cases, rules).join("\n"), /RequestId header pattern is \^\[A-Za-z0-9\]\{1,64\}\$, expected/);
+  const body = spec();
+  body.components.responses.BadRequest["x-maxBodyBytes"] = 1;
+  assert.match(checkSpec(body, cases, rules).join("\n"), new RegExp(`x-maxBodyBytes is 1, expected ${CONTRACT.limits.maxBodyBytes}`));
 });
+
+test("the configuration section is well formed, and every placeholder is one the runner fills", () => {
+  const variables = Object.entries(CONTRACT.config).filter(([name]) => !name.startsWith("$"));
+  assert.ok(variables.length > 0);
+  const reported = new Set();
+  for (const [name, spec] of variables) {
+    assert.match(name, /^[A-Z][A-Z0-9_]*$/, name);
+    assert.equal(typeof spec.reportedAs, "string", name);
+    assert.ok(!reported.has(spec.reportedAs), `${name} reports as ${spec.reportedAs}, as another variable does`);
+    reported.add(spec.reportedAs);
+    assert.equal(typeof spec.default.value, "string", `${name} default value`);
+    assert.equal(typeof spec.default.effective, "number", `${name} default effective`);
+    for (const { value, effective } of spec.accept) {
+      assert.equal(typeof value, "string", `${name} accept`);
+      assert.ok(typeof effective === "number" || effective === "{port}", `${name}=${value} effective`);
+      assert.doesNotThrow(() => fillPort(value, 1), `${name}=${value}`);
+    }
+    for (const value of spec.refuse) assert.doesNotThrow(() => fillPort(value, 1), `${name}=${value}`);
+    const values = [...spec.accept.map((a) => a.value), ...spec.refuse];
+    assert.equal(new Set(values).size, values.length, `${name} lists a value twice`);
+  }
+  assert.throws(() => fillPort("{port:roman}", 1), /unknown digits \{port:roman\}/);
+  assert.equal(fillPort("{port:fullwidth}|{port:arabic-indic}|+{port}", 809), "\uff18\uff10\uff19|\u0668\u0660\u0669|+809");
+});
+
+test("configuration cases: an unset and an empty variable read as its default, except where that would bind a port", () => {
+  const config = {
+    PORT: { reportedAs: "port", binds: true, default: { value: "80", effective: 80 }, accept: [{ value: "{port}", effective: "{port}" }], refuse: ["x"] },
+    WAIT: { reportedAs: "waitMs", default: { value: "1s", effective: 1000 }, accept: [{ value: "2s", effective: 2000 }], refuse: ["-1s"] },
+  };
+  const cases = configCases(config);
+  assert.deepEqual(cases.map((c) => [c.variable, c.value, c.accept]), [
+    ["PORT", "{port}", true],
+    ["PORT", "x", false],
+    ["WAIT", undefined, true],
+    ["WAIT", "", true],
+    ["WAIT", "1s", true],
+    ["WAIT", "2s", true],
+    ["WAIT", "-1s", false],
+  ]);
+  // A value in the shell that runs the check never leaks in.
+  const env = configEnv(config, cases[5], 4321, { PATH: "/bin", WAIT: "9s", PORT: "1" });
+  assert.deepEqual(env, { PATH: "/bin", PORT: "4321", WAIT: "2s" });
+  assert.deepEqual(configEnv(config, cases[2], 4321, { WAIT: "9s" }), { PORT: "4321" });
+  assert.deepEqual(configEnv(config, null, 4321, { WAIT: "9s" }), { PORT: "4321" });
+  assert.deepEqual(expectedReport(config, cases[5], 4321), { port: 4321, waitMs: 2000 });
+  assert.deepEqual(expectedReport(config, cases[0], 4321), { port: 4321, waitMs: 1000 });
+});
+
+test("a start is judged on its listening line, or on its refusal line and exit code", () => {
+  const contract = { config: { WAIT: { reportedAs: "waitMs", default: { value: "1s", effective: 1000 }, accept: [], refuse: [] } }, startup: CONTRACT.startup };
+  const { listening, refused } = CONTRACT.startup;
+  const up = (fields) => ({ lines: [{ ...listening, ...fields }], listening: { ...listening, ...fields }, exitCode: null, stderr: "" });
+  const down = (lines, exitCode = refused.exitCode) => ({ lines, listening: null, exitCode, stderr: "" });
+  const take = { variable: "WAIT", value: "0.25ms", accept: true, effective: 0.25 };
+  const refuse = { variable: "WAIT", value: "x", accept: false };
+  const refusal = { level: refused.level, msg: refused.msg, error: "WAIT must be a duration" };
+
+  assert.deepEqual(judgeStartup(contract, take, 1, up({ waitMs: 0.25000000000000006 })), [], "floating point is not a mismatch");
+  assert.match(judgeStartup(contract, take, 1, up({ waitMs: 250 })).join(), /reports waitMs 250, expected 0\.25/);
+  assert.match(judgeStartup(contract, take, 1, down([refusal])).join(), /exited 2 instead of starting: WAIT must be a duration/);
+  assert.deepEqual(judgeStartup(contract, refuse, 1, down([refusal])), []);
+  assert.match(judgeStartup(contract, refuse, 1, up({ waitMs: 1000 })).join(), /started, reporting .* where it must refuse the value/);
+  assert.match(judgeStartup(contract, refuse, 1, down([refusal], 1)).join(), new RegExp(`exited 1, expected ${refused.exitCode}`));
+  assert.match(judgeStartup(contract, refuse, 1, down([])).join(), /wrote no .*invalid configuration.* line to stdout/);
+  assert.match(judgeStartup(contract, refuse, 1, down([{ ...refusal, error: "bad value" }])).join(), /its error "bad value" does not name WAIT/);
+});
+
+test("an image exposes the port the contract defaults to, and sets no contract variable", () => {
+  const { config } = CONTRACT;
+  const port = config.PORT.default.value;
+  assert.deepEqual(checkImage(`FROM x\nEXPOSE ${port}\nCMD ["x"]\n`, config), []);
+  assert.deepEqual(checkImage(`FROM x\nEXPOSE ${port}/tcp\n`, config), []);
+  assert.match(checkImage("FROM x\nEXPOSE 9999\n", config).join(), new RegExp(`exposes 9999, but PORT defaults to ${port}`));
+  assert.match(checkImage("FROM x\n", config).join(), /exposes no port/);
+  assert.match(checkImage(`FROM x\nENV A=1 \\\n    PORT=9999\nEXPOSE ${port}\n`, config).join(), /sets PORT, so the image's default is not the contract's/);
+});
+
+// A service whose configuration parser has the mistakes api-py once had: any script's digits, and a
+// final newline, read as a number. The runner must start it for each value and catch both.
+const LENIENT_SERVICE = `
+const env = process.env;
+const log = (line) => console.log(JSON.stringify({ time: new Date().toISOString(), ...line }));
+const port = /^\\p{Nd}+\\n?$/u.test(env.PORT ?? "") ? Number([...env.PORT.trim()].map((c) => /\\p{Nd}/u.test(c) ? String(c.codePointAt(0) & 15) : c).join("")) : NaN;
+if (!(port >= 1 && port <= 65535)) { log({ level: "error", msg: "invalid configuration", error: "PORT must be a port" }); process.exit(2); }
+const server = require("node:http").createServer((req, res) => res.end());
+server.listen(port, "127.0.0.1", () => log({ level: "info", msg: "listening", port }));
+process.on("SIGTERM", () => server.close(() => process.exit(0)));
+`;
+
+test("the configuration runner starts a real process for each value and catches a lenient parser", async () => {
+  const contract = {
+    startup: CONTRACT.startup,
+    config: {
+      PORT: {
+        reportedAs: "port",
+        binds: true,
+        default: { value: "8080", effective: 8080 },
+        accept: [{ value: "{port}", effective: "{port}" }],
+        refuse: ["http", "{port:fullwidth}", "{port}\n"],
+      },
+    },
+  };
+  const { count, failures } = await checkConfig([process.execPath, "-e", LENIENT_SERVICE], process.cwd(), contract);
+  assert.equal(count, 4);
+  assert.deepEqual(failures.map((f) => f.name), ['PORT="{port:fullwidth}"', 'PORT="{port}\\n"']);
+  assert.match(failures[0].problems.join(), /started, reporting .*"msg":"listening".* where it must refuse the value/);
+});
+

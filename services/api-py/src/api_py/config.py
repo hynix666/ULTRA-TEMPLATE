@@ -26,9 +26,14 @@ _UNIT_MS: Final[dict[str, float]] = {
 
 # The grammar of Go's time.ParseDuration: an optional sign, then one or more numbers ("1", "1.",
 # ".5", "1.5") each followed by a unit. Longer units come first so "ms" is not read as "m".
-_PART = r"(\d+\.?\d*|\.\d+)(ns|us|µs|μs|ms|h|m|s)"
-_DURATION = re.compile(rf"^[-+]?(?:{_PART})+$")
-_PORT = re.compile(r"^[+-]?\d+$")
+# Go reads the digits 0-9 and nothing after the value. So the patterns spell out [0-9], since \d (and
+# int() and float() after it) would take any script's digits, and are matched with fullmatch, since $
+# would also match before a final newline.
+_PART = r"([0-9]+\.?[0-9]*|\.[0-9]+)(ns|us|µs|μs|ms|h|m|s)"
+_DURATION = re.compile(rf"[-+]?(?:{_PART})+")
+_PORT = re.compile(r"[+-]?[0-9]+")
+# Go's time.Duration is an int64 of nanoseconds, so api-go refuses a longer duration, and so does this.
+_MAX_DURATION_MS: Final = (2**63 - 1) / 1_000_000
 
 
 class ConfigError(Exception):
@@ -42,22 +47,25 @@ class Config:
 
 
 def parse_duration_ms(raw: str) -> float | None:
-    """Go's duration syntax — 10s, 1m30s, .5s, 500ms, 250us — or None when the text is not one.
+    """Go's duration syntax — 10s, 1m30s, .5s, 500ms, 250us — or None when the text is not one, or
+    is longer than Go can hold.
 
     Not rounded: a sub-millisecond timeout is still positive, as it is in Go.
     """
-    if _DURATION.match(raw) is None:
+    if _DURATION.fullmatch(raw) is None:
         return None
     total = 0.0
     for amount, unit in re.findall(_PART, raw):
         total += float(amount) * _UNIT_MS[unit]
+    if total > _MAX_DURATION_MS:
+        return None
     return -total if raw.startswith("-") else total
 
 
 def load_config(env: Mapping[str, str]) -> Config:
     raw_port = env.get("PORT", "")
     # Digits only, as Go's strconv.Atoi reads them: int() would also accept "_8080" and " 8080".
-    port = DEFAULT_PORT if raw_port == "" else (int(raw_port) if _PORT.match(raw_port) else -1)
+    port = DEFAULT_PORT if raw_port == "" else (int(raw_port) if _PORT.fullmatch(raw_port) else -1)
     if not 1 <= port <= 65535:
         raise ConfigError(f'PORT must be an integer from 1 to 65535, got "{raw_port}"')
 

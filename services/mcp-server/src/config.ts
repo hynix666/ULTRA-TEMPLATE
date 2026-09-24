@@ -11,10 +11,12 @@ export interface Config {
 
 export class ConfigError extends Error {}
 
-const DEFAULT_TIMEOUT_MS = 10_000;
+/** A task service on this machine, on the port every task service listens on by default. */
+export const DEFAULT_TASK_API_URL = "http://localhost:8080";
+export const DEFAULT_TIMEOUT_MS = 10_000;
 
 export function loadConfig(env: Readonly<Record<string, string | undefined>>): Config {
-  const rawUrl = env["TASK_API_URL"] ?? "http://localhost:8080";
+  const rawUrl = env["TASK_API_URL"] ?? DEFAULT_TASK_API_URL;
   let url: URL;
   try {
     url = new URL(rawUrl);
