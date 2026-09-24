@@ -8,7 +8,12 @@ requires-python = ">=3.13"
 dependencies = []
 
 [dependency-groups]
-dev = ["mypy>=1.18.2", "pytest>=8.4.2", "ruff>=0.14.4"]
+dev = [
+    "coverage>=7.10",
+    "mypy>=1.18.2",
+    "pytest>=8.4.2",
+    "ruff>=0.14.4",
+]
 
 [tool.uv]
 # The one place uv's version is pinned: uv refuses to run outside this range, and every workflow's
@@ -45,3 +50,9 @@ testpaths = ["tests"]
 # from scripts/.
 pythonpath = ["src", "scripts"]
 addopts = "-q"
+
+[tool.coverage.run]
+# Measured in CI and written to the job summary, never gated (scripts/coverage-summary.mjs). The data
+# file goes under coverage/, which is ignored, rather than beside the sources.
+source = ["src"]
+data_file = "coverage/.coverage"

@@ -6,9 +6,10 @@
  *   node scripts/verify.mjs go-service web   # the chassis and only the modules named
  *
  * A step that cannot run FAILS. A check that quietly does not run reads exactly like one that
- * passed, so a missing toolchain or missing dependencies is a red line with the fix in it. The one
- * exception is golangci-lint, a linter many machines lack: it is reported as SKIPPED by name, and
- * the go-service CI job always runs it.
+ * passed, so a missing toolchain or missing dependencies is a red line with the fix in it, and so is a
+ * Node whose major version differs from .node-version. Two exceptions are reported as SKIPPED by name,
+ * and the go-service CI job always runs both: golangci-lint, a linter many machines lack, and Go's race
+ * detector, which needs cgo and a C compiler.
  *
  * Exit 0 everything passed · 1 something failed · 2 a module name that is unknown or not present.
  */
@@ -20,7 +21,7 @@ import { TASK_SERVICES } from "./check-contract.mjs";
 // ultra:begin mcp-server|web|ts-library
 import { RULE_MODULES } from "./check-rules.mjs";
 // ultra:end mcp-server|web|ts-library
-import { available, MODULES, presentModules, ROOT, run } from "./modules.mjs";
+import { available, checkNodeVersion, MODULES, presentModules, ROOT, run } from "./modules.mjs";
 
 const results = [];
 const record = (name, status, note = "") => results.push({ name, status, note });
@@ -32,6 +33,9 @@ function step(name, command, args, cwd = ROOT) {
 }
 
 function chassis() {
+  // Every check below runs on this Node; on another major than CI's, a pass predicts nothing.
+  const wrongNode = checkNodeVersion();
+  record("chassis: node version", wrongNode === null ? "pass" : "fail", wrongNode ?? "");
   step("chassis: hygiene", "node", ["scripts/check-hygiene.mjs"]);
   step("chassis: docs", "node", ["scripts/check-docs.mjs"]);
   const suites = ["test/*.test.mjs"];
@@ -75,7 +79,16 @@ function goModule(module) {
   record(`${module.id}: gofmt`, fmt.status === 0 && unformatted.length === 0 ? "pass" : "fail", unformatted.join(", "));
   step(`${module.id}: go mod tidy -diff`, "go", ["mod", "tidy", "-diff"], cwd);
   step(`${module.id}: go vet`, "go", ["vet", "./..."], cwd);
-  step(`${module.id}: go test`, "go", ["test", "./..."], cwd);
+  // The race detector needs cgo and a C compiler. Where they are missing, the tests still run without
+  // it and the gap is named, as golangci-lint's is: the go-service CI job always runs with -race.
+  const cc = run("go", ["env", "CC"], { cwd, capture: true }).stdout.trim() || "gcc";
+  const race = run("go", ["env", "CGO_ENABLED"], { cwd, capture: true }).stdout.trim() === "1" && available(cc, ["--version"]);
+  if (race) {
+    step(`${module.id}: go test -race`, "go", ["test", "-race", "./..."], cwd);
+  } else {
+    step(`${module.id}: go test`, "go", ["test", "./..."], cwd);
+    record(`${module.id}: go test -race`, "skipped", "needs cgo and a C compiler; the go-service CI job runs it");
+  }
   if (available("golangci-lint")) step(`${module.id}: golangci-lint`, "golangci-lint", ["run"], cwd);
   else record(`${module.id}: golangci-lint`, "skipped", "not on PATH; the go-service CI job runs it");
 }

@@ -48,6 +48,30 @@ jobs:
         run: node --test "template/*.test.mjs"
       # ultra:end template
 
+  # The chassis is written to run on Windows too (no make, no symlinks, npm through a shell), and a
+  # claim nothing runs is a claim nobody keeps. Only the chassis: the modules' own toolchains are
+  # checked on Linux, where CI and the container images run them.
+  chassis-windows:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .node-version
+      - name: Repository hygiene
+        run: node scripts/check-hygiene.mjs
+      - name: Documentation shape
+        run: node scripts/check-docs.mjs
+      - name: Chassis tests
+        run: node --test "test/*.test.mjs"
+      # ultra:begin template
+      - name: Template tests
+        run: node --test "template/*.test.mjs"
+      # ultra:end template
+
   actionlint:
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -95,7 +119,10 @@ jobs:
           unformatted="$(gofmt -l .)"
           if [ -n "$unformatted" ]; then echo "Not gofmt-formatted:"; echo "$unformatted"; exit 1; fi
       - run: go vet ./...
-      - run: go test -race ./...
+      - run: go test -race -coverprofile="$RUNNER_TEMP/coverage.out" ./...
+      - name: Coverage (report-only, never a gate)
+        run: |
+          { echo "| Module | Lines covered | Covered of total |"; echo "|---|---|---|"; node ../../scripts/coverage-summary.mjs go-service "$RUNNER_TEMP/coverage.out"; } >> "$GITHUB_STEP_SUMMARY"
       - uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
         with:
           version: v2.13.2
@@ -138,6 +165,10 @@ jobs:
       - run: npm ci --ignore-scripts
       - run: npm audit signatures
       - run: npm run verify
+      - name: Coverage (report-only, never a gate)
+        run: |
+          npm run --silent coverage > /dev/null
+          { echo "| Module | Lines covered | Covered of total |"; echo "|---|---|---|"; node ../../scripts/coverage-summary.mjs ts-service coverage/lcov.info; } >> "$GITHUB_STEP_SUMMARY"
       - name: The task API contract
         run: node ../../scripts/check-contract.mjs ts-service
       # Building an image proves little; this starts it and asks it the one question a load balancer will.
@@ -173,6 +204,10 @@ jobs:
       - run: npm ci --ignore-scripts
       - run: npm audit signatures
       - run: npm run verify
+      - name: Coverage (report-only, never a gate)
+        run: |
+          npm run --silent coverage > /dev/null
+          { echo "| Module | Lines covered | Covered of total |"; echo "|---|---|---|"; node ../../scripts/coverage-summary.mjs mcp-server coverage/lcov.info; } >> "$GITHUB_STEP_SUMMARY"
       - name: The task rules
         run: node ../../scripts/check-rules.mjs mcp-server
       - name: Container image starts and speaks MCP
@@ -210,7 +245,11 @@ jobs:
       - run: uv run --frozen ruff check .
       - run: uv run --frozen ruff format --check .
       - run: uv run --frozen mypy
-      - run: uv run --frozen pytest
+      - run: uv run --frozen coverage run -m pytest
+      - name: Coverage (report-only, never a gate)
+        run: |
+          uv run --frozen coverage lcov -o coverage/lcov.info
+          { echo "| Module | Lines covered | Covered of total |"; echo "|---|---|---|"; node ../../scripts/coverage-summary.mjs py-service coverage/lcov.info; } >> "$GITHUB_STEP_SUMMARY"
       - run: uv run --frozen python scripts/check_boundaries.py
       - name: The task API contract
         run: node ../../scripts/check-contract.mjs py-service
@@ -247,6 +286,10 @@ jobs:
       - run: npm ci --ignore-scripts
       - run: npm audit signatures
       - run: npm run verify
+      - name: Coverage (report-only, never a gate)
+        run: |
+          npm run --silent coverage > /dev/null
+          { echo "| Module | Lines covered | Covered of total |"; echo "|---|---|---|"; node ../../scripts/coverage-summary.mjs web coverage/lcov.info; } >> "$GITHUB_STEP_SUMMARY"
       - name: The task rules
         run: node ../../scripts/check-rules.mjs web
   # ultra:end web
@@ -270,6 +313,10 @@ jobs:
       - run: npm ci --ignore-scripts
       - run: npm audit signatures
       - run: npm run verify
+      - name: Coverage (report-only, never a gate)
+        run: |
+          npm run --silent coverage > /dev/null
+          { echo "| Module | Lines covered | Covered of total |"; echo "|---|---|---|"; node ../../scripts/coverage-summary.mjs ts-library coverage/lcov.info; } >> "$GITHUB_STEP_SUMMARY"
       - name: The task rules
         run: node ../../scripts/check-rules.mjs ts-library
   # ultra:end ts-library
@@ -293,12 +340,17 @@ jobs:
       - run: npm ci --ignore-scripts
       - run: npm audit signatures
       - run: npm run verify
+      - name: Coverage (report-only, never a gate)
+        run: |
+          npm run --silent coverage > /dev/null
+          { echo "| Module | Lines covered | Covered of total |"; echo "|---|---|---|"; node ../scripts/coverage-summary.mjs architecture coverage/lcov.info; } >> "$GITHUB_STEP_SUMMARY"
   # ultra:end architecture
 
   verify:
     if: always()
     needs:
       - chassis
+      - chassis-windows
       - actionlint
       - zizmor
       # ultra:begin go-service
