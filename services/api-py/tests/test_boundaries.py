@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from check_boundaries import check_file, check_tree
+from check_boundaries import check_file, check_tree, effects
 
 
 def test_the_domain_may_not_import_effects_packages_or_other_layers() -> None:
@@ -49,3 +49,31 @@ def test_the_real_source_tree_has_no_violations() -> None:
     files, problems = check_tree(Path(__file__).resolve().parent.parent)
     assert files > 0
     assert problems == []
+
+
+def test_below_the_composition_root_nothing_reads_a_clock_randomness_or_the_environment() -> None:
+    planted = [
+        "import time\nstarted = time.monotonic()",
+        "import time as clock\nnow = clock.time()",
+        "from datetime import datetime\nat = datetime.now()",
+        "import datetime\nat = datetime.datetime.now()",
+        "from time import perf_counter",
+        "import os\nport = os.environ['PORT']",
+        "from os import getenv",
+        "import secrets\ntoken = secrets.token_hex(8)",
+        "from random import choice",
+        "import uuid\nid_ = uuid.uuid4()",
+    ]
+    for source in planted:
+        assert effects(source), source
+        assert any("below the composition root" in p for p in check_file("adapters/x.py", source)), source
+    # The composition root is where they belong; a name in a string, a parsed date and os.path are not effects.
+    assert check_file("main.py", "\n".join(planted)) == []
+    harmless = [
+        "import os",
+        "from datetime import datetime",
+        "d = datetime.fromisoformat(s)",
+        "p = os.path.join('a')",
+        "x = 'time.time()'",
+    ]
+    assert effects("\n".join(harmless)) == []

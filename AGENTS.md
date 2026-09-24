@@ -21,7 +21,7 @@ Each of these fails `scripts/check-hygiene.mjs` or a module's own checks. Do not
 
 ## Architecture
 
-Services keep domain, use cases, adapters and a composition root, with dependencies pointing inward ([ADR-0005](docs/adr/0005-layered-services-with-enforced-boundaries.md)). Clocks and id sources are injected; nothing below the composition root reads the wall clock, randomness or the environment.
+Services keep domain, use cases, adapters and a composition root, with dependencies pointing inward ([ADR-0005](docs/adr/0005-layered-services-with-enforced-boundaries.md)). Clocks and id sources are injected; nothing below the composition root reads the wall clock, randomness or the environment, and each service's own boundary check fails on a file that does.
 
 <!-- ultra:begin go-service -->
 ### services/api-go

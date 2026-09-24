@@ -18,7 +18,9 @@ const LEDGER = {
   "Clean Architecture services whose layer rules are tests": {
     paths: [
       "services/api-go/internal/architecture_test.go",
+      "services/api-go/internal/effects_test.go",
       "services/api-ts/scripts/check-boundaries.mjs",
+      "services/mcp-server/scripts/check-boundaries.mjs",
       "services/api-py/scripts/check_boundaries.py",
       "scripts/check-contract.mjs",
       "scripts/contract/tasks-api.json",

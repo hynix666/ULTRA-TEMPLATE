@@ -40,3 +40,24 @@ test("the real source tree has no violations", () => {
   assert.ok(files > 0);
   assert.deepEqual(problems, []);
 });
+
+test("below the composition root nothing reads the clock, randomness or the environment", () => {
+  const planted = [
+    "const at = Date.now();",
+    "const at = new Date();",
+    "const t = performance.now();",
+    "const n = Math.random();",
+    'import { randomUUID } from "node:crypto";\nconst id = randomUUID();',
+    'const port = process.env["PORT"];',
+  ];
+  for (const source of planted) {
+    assert.match(checkFile("src/adapters/x.ts", source).join(), /below the composition root it is injected/, source);
+    assert.match(checkFile("src/application/x.ts", source).join(), /below the composition root it is injected/, source);
+  }
+  // The composition root is where they are allowed; parsing a date, and naming one in a comment, are not effects.
+  assert.deepEqual(checkFile("src/main.ts", planted.join("\n")), []);
+  assert.deepEqual(
+    checkFile("src/adapters/x.ts", 'const d = new Date(iso);\n// like performance.now()\n/* Date.now() */\nconst u = "http://x";'),
+    [],
+  );
+});
