@@ -61,6 +61,8 @@ The tests drive the server through a real MCP client over an in-memory transport
 
 `.github/workflows/mcp-publish.yml` publishes the image to GitHub Container Registry and `server.json` to the [MCP Registry](https://registry.modelcontextprotocol.io), where clients discover servers. It uses no stored token: the image is pushed with the run's `GITHUB_TOKEN`, and the registry trusts GitHub's OIDC identity for the `io.github.<owner>/` namespace. The image is built for `linux/amd64` and `linux/arm64`, each on a native runner, and published as one tag, so it runs natively on an Apple Silicon Mac. The two builds also stay in the registry as `<version>-amd64` and `<version>-arm64`. In a private repository the arm64 runner uses paid Actions minutes once the free allowance is spent.
 
+The published image carries a build provenance attestation, a signed record of the workflow run and commit that built it, which anyone can check with `gh attestation verify oci://ghcr.io/<owner>/ultra-template-mcp-server:<version> --owner <owner>`. GitHub provides attestations to public repositories, and to private ones only on GitHub Enterprise Cloud, where setting the repository variable `ATTESTATIONS_ENABLED=true` turns the step on.
+
 It runs after each release that creates a version tag, and on demand with a version. Its first job runs in the GitHub environment `mcp-registry`, which GitHub creates on first use; a required reviewer or a limit on which refs may publish, set there, holds the whole publish. One-time setup:
 
 1. Release at least once, so a `v*` tag exists (the `release` feature does this; `gh release create` works too).
