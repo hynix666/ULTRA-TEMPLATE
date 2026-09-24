@@ -47,7 +47,9 @@ uv run pytest
 uv run python scripts/check_boundaries.py
 ```
 
-`node scripts/verify.mjs py-service` runs all four, after checking that `uv.lock` still matches `pyproject.toml`, and then the contract; CI runs the same. uv's own version is pinned once, in `[tool.uv] required-version`.
+`node scripts/verify.mjs py-service` runs all four, after checking that `uv.lock` still matches `pyproject.toml`, and then the contract; CI runs the same. uv's own version is pinned once, in `scripts/tools/tools.json`; `[tool.uv] required-version` is the range this project accepts, and check-hygiene holds the pin inside it.
+
+To add a store, write a class with the `TaskRepository` shape in `src/api_py/adapters` and choose it in `main.py`. Its test passes a function that returns a fresh, empty store to `check_task_repository` from `tests/task_repository_conformance.py` and expects no problems, as `tests/test_memory_task_repository.py` does: that suite is the behaviour the service relies on from a store.
 
 ## Container
 

@@ -47,4 +47,4 @@ gofmt -l . && go vet ./... && go test -race ./... && golangci-lint run
 docker build -t api-go .
 ```
 
-To add a store, implement `usecase.TaskRepository` in a new package under `internal/repo/` and choose it in `internal/app`. The memory repository's tests describe the behaviour a store must match.
+To add a store, implement `usecase.TaskRepository` in a new package under `internal/repo/` and choose it in `internal/app`. Its tests call `repotest.Run` with a function that returns a fresh, empty store, as the memory store's tests do: `internal/repo/repotest` is the behaviour the service relies on from a store, and passing it is what makes the new one a replacement rather than a rewrite.
