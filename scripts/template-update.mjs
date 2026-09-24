@@ -236,6 +236,14 @@ export function update({ project, to, add = [], remove = [], dryRun = false, tem
     if (applied.status !== 0 && conflicts.length === 0) {
       throw new UpdateError(`git apply could not use the patch: ${applied.stderr.trim().split("\n").at(-1)}`);
     }
+    // A removed feature's directory can still hold what setup installed or a build wrote, all ignored, and
+    // a module counts as present while its directory exists. The tree was clean when this started, so
+    // once no tracked file is left in one, nothing in it is the project's; it goes whole, as init does.
+    const emptied = [...new Set(removedPaths)]
+      .filter((dir) => !keptPaths.some((kept) => inside(dir, kept) || inside(kept, dir)))
+      .filter((dir) => existsSync(join(project, dir)) && git(project, ["ls-files", "--", dir]).trim() === "");
+    for (const dir of emptied) rmSync(join(project, dir), { recursive: true, force: true });
+    if (emptied.length > 0) log(`template-update: removed ${emptied.join(", ")} with the ignored files left in it (dependencies, build output)`);
     // Written even when there are conflicts: the record is part of the same uncommitted change, so
     // reverting the update removes it too, and committing the resolved update keeps it.
     writeFileSync(changelogPath, record());

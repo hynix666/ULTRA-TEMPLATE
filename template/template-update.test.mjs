@@ -209,6 +209,19 @@ test("removing a feature takes its files and its marked lines out, and records t
   assert.deepEqual(origin.features, ["release"]);
 });
 
+test("removing a feature removes its directory whole, installed dependencies included", () => {
+  const dir = withFeatures("remove-installed", ["ts-library"]);
+  // What setup leaves in a module: ignored, so the working tree is still clean.
+  mkdirSync(join(dir, "packages/ts-library/node_modules/pkg"), { recursive: true });
+  writeFileSync(join(dir, "packages/ts-library/node_modules/pkg/index.js"), "");
+  assert.equal(git(dir, "status", "--porcelain"), "");
+
+  select(dir, { remove: ["ts-library"] });
+
+  // A module is present when its directory is; one left holding only node_modules is still "present".
+  assert.equal(existsSync(join(dir, "packages/ts-library")), false);
+});
+
 test("adding a feature brings its files and marked lines in, in the template's order", () => {
   const dir = withFeatures("add", ["release"]);
   const result = select(dir, { add: ["ts-library"] });
