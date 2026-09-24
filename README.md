@@ -196,6 +196,15 @@ node scripts/template-update.mjs --to vX.Y.Z             # apply, then review, v
 
 Updates only move forward: a release older than the one the project is on is refused.
 
+The same script changes which features the project has, by the same means: the "after" side is generated with the new selection. Without `--to` it stays on the release the project is on; with it, the release and the selection move in one change. The new selection is recorded in `CHANGELOG.md`, where the next update reads it.
+
+```bash
+node scripts/template-update.mjs --add web --dry-run      # what adding the web app would bring
+node scripts/template-update.mjs --remove py-service      # give up the Python service
+```
+
+A removal is refused, with the paths named, when it would delete a file you changed or leave behind a file of your own inside the feature's directory: move those first, then run it again.
+
 The `update-from-template` skill walks an agent through the whole procedure.
 
 ## Contributing and security
