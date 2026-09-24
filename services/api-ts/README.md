@@ -14,27 +14,44 @@ src/main.ts        composition root: the only place concrete adapters are chosen
 
 ## Run
 
+<!-- generated:fill
+```bash
+npm install
+npm start
+curl -s localhost:{{contract config.PORT.default.value}}/api/tasks -d '{"title":"ship it"}'
+```
+-->
 ```bash
 npm install
 npm start
 curl -s localhost:8080/api/tasks -d '{"title":"ship it"}'
 ```
+<!-- /generated -->
 
-`PORT` (default `8080`) and `SHUTDOWN_TIMEOUT` (default `10s`; Go duration syntax, such as `1m30s`, `.5s` or `500ms`) configure it, with the same rules as the other services in this template.
+<!-- generated:config-table -->
+| Variable | Default | Meaning |
+|---|---|---|
+| `PORT` | `8080` | The TCP port it listens on, from 1 to 65535, in the digits 0 to 9 as Go's strconv.Atoi reads them |
+| `SHUTDOWN_TIMEOUT` | `10s` | How long requests in flight may finish after SIGTERM or SIGINT, in Go's duration syntax, such as 1m30s, .5s or 500ms |
+<!-- /generated -->
+
+The same variables, read by the same rules, configure every task service in this project.
 
 ## API
 
-| Method and path | Result |
+<!-- generated:api-table -->
+| Method and path | Answers |
 |---|---|
-| `GET /healthz` | `200 {"status":"ok"}` |
-| `GET /api/tasks` | `200` every task, oldest first |
-| `POST /api/tasks` `{"title"}` | `201` the task · `422` invalid title |
-| `GET /api/tasks/{id}` | `200` the task · `404` |
-| `PATCH /api/tasks/{id}/status` `{"status"}` | `200` · `409` transition not allowed · `422` unknown status |
+| `GET /healthz` | `200` The service is up |
+| `GET /api/tasks` | `200` Every task |
+| `POST /api/tasks` `{"title"}` | `201` The task, created · `400` The body is not one JSON object of the documented fields, or is over the size limit · `422` The title is empty once trimmed, or longer than the rules allow |
+| `GET /api/tasks/{id}` | `200` The task · `400` The id is not a valid path segment, such as a malformed percent-escape · `404` No task has this id |
+| `PATCH /api/tasks/{id}/status` `{"status"}` | `200` The task, moved · `400` The body is not one JSON object of the documented fields, or is over the size limit · `404` No task has this id · `409` The rules do not allow this move from the task's status, staying put included · `422` The status is missing, null, or not one of the statuses |
+<!-- /generated -->
 
-Bodies are capped at 1 MiB and unknown fields are rejected with `400`. `HEAD` is answered wherever `GET` is. A missing or `null` title reads as empty (`422`); a title of another type, an empty body and a malformed path are refused as malformed (`400`). Every error is JSON, `{"error": "…"}`. The cases in [`scripts/contract/tasks-api.json`](../../scripts/contract/tasks-api.json) are the contract every task service keeps, and `node scripts/check-contract.mjs` holds this one to them. This module keeps its own copy of the table so it stays readable, and removable, on its own.
+Bodies are capped at <!-- generated:contract limits.maxBodyBytes bytes -->1 MiB<!-- /generated --> and unknown fields are rejected with `400`. `HEAD` is answered wherever `GET` is. A missing or `null` title reads as empty (`422`); a title of another type, an empty body and a malformed path are refused as malformed (`400`). Every error is JSON, `{"error": "…"}`. The cases in [`scripts/contract/tasks-api.json`](../../scripts/contract/tasks-api.json) are the contract every task service keeps, and `node scripts/check-contract.mjs` holds this one to them. This module keeps its own copy of the table so it stays readable, and removable, on its own.
 
-Every response carries an `X-Request-Id`: the one the caller sent when it is 1 to 128 letters, digits, `.`, `_` or `-`, otherwise a new one. Every request is logged once to stdout as one JSON line holding `time`, `level`, `msg` (`"request"`), `method`, `path` (without the query string, which can carry what should not be logged), `status`, `durationMs` and `requestId`. The line is the same in every task service, and the contract check reads it. [`scripts/contract/openapi.json`](../../scripts/contract/openapi.json) describes the same API for clients and tools, and is held to the same cases.
+Every response carries an `X-Request-Id`: the one the caller sent when it is 1 to <!-- generated:contract limits.requestId.maxLength -->128<!-- /generated --> letters, digits, `.`, `_` or `-`, otherwise a new one. Every request is logged once to stdout as one JSON line holding `time`, `level`, `msg` (`"request"`), `method`, `path` (without the query string, which can carry what should not be logged), `status`, `durationMs` and `requestId`. The line is the same in every task service, and the contract check reads it. [`scripts/contract/openapi.json`](../../scripts/contract/openapi.json) describes the same API for clients and tools, and is held to the same cases.
 
 ## Check
 

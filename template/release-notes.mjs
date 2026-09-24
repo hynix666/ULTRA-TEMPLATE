@@ -12,15 +12,36 @@
  *   node template/release-notes.mjs --to v1.4.1                 # since the previous release tag
  *   node template/release-notes.mjs --to v1.4.1 --from v1.3.0
  *
+ * A file list says what changes, not what an adopter must do about it: which new check can turn their
+ * build red, which file to merge by hand. So a minor or major release carries notes of its own,
+ * template/notes/v<version>.md, written with the change, and they come first, under "What you need to
+ * know". A test fails a patch-0 version without them (NOTES_DIR).
+ *
  * Template-only: init deletes it, with the rest of template/.
  */
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, sep } from "node:path";
 import { parseArgs } from "node:util";
 import { pathToFileURL } from "node:url";
 import { ROOT } from "./init.mjs";
+
+/** Where a release's notes for adopters live, as v<version>.md. Template-only, like everything here. */
+export const NOTES_DIR = "template/notes";
+
+/** The first release written with notes; the releases before it were published without any. */
+export const NOTES_SINCE = "1.2.0";
+
+/** Whether version `a` comes before version `b`. */
+const older = (a, b) => {
+  const [x, y] = [a, b].map((v) => v.split(".").map(Number));
+  const at = x.findIndex((n, i) => n !== y[i]);
+  return at !== -1 && x[at] < y[at];
+};
+
+/** The notes file a version must have: every minor and major release, which is every patch-0 version. */
+export const requiredNotes = (version) => (/^\d+\.\d+\.0$/.test(version) && !older(version, NOTES_SINCE) ? `${NOTES_DIR}/v${version}.md` : null);
 
 // The same at both releases, so the identity cancels out of the comparison.
 const IDENTITY = ["--name", "demo-app", "--owner", "octo-org"];
@@ -91,9 +112,11 @@ function firstRelease(pullRequests) {
   return lines.join("\n");
 }
 
-export function render({ to, from, groups, templateOnly = [], addedPresets = [], pullRequests = "" }) {
+export function render({ to, from, groups, templateOnly = [], addedPresets = [], pullRequests = "", notes = "" }) {
   if (from === null) return firstRelease(pullRequests);
-  const lines = [`Changes since ${from}.`, "", "## What changes in generated projects", ""];
+  const lines = [`Changes since ${from}.`, ""];
+  if (notes.trim() !== "") lines.push("## What you need to know", "", notes.trim(), "");
+  lines.push("## What changes in generated projects", "");
   lines.push(groups.length === 0
     ? "Nothing: no file changes in a project made from any preset."
     : "Every preset was generated at both releases, with that release's own init, and compared. This is what an update applies.", "");
@@ -189,7 +212,10 @@ function main() {
     const templateOnly = entries.filter(([, path]) => !reaching.has(path)).map(([status, path]) => `${status} ${path}`);
 
     const pullRequests = mergedPullRequests(values.repo, values.to, from);
-    process.stdout.write(render({ to: values.to, from, groups: groupByPreset(perPreset), templateOnly, addedPresets, pullRequests }));
+    // Read from the release's own tree, as everything else here is.
+    const notesFile = join(after, NOTES_DIR, `${values.to}.md`);
+    const notes = existsSync(notesFile) ? readFileSync(notesFile, "utf8") : "";
+    process.stdout.write(render({ to: values.to, from, groups: groupByPreset(perPreset), templateOnly, addedPresets, pullRequests, notes }));
   } finally {
     for (const dir of worktrees) {
       try {

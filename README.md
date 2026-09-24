@@ -30,7 +30,7 @@ It is for anyone starting a service, a web app, a library or an MCP server who w
    node template/init.mjs --list
    ```
 
-3. Initialize. This needs Node 24 and a clean working tree. Run in a terminal, init reads the owner and repository from `origin`, asks for anything else, shows the plan and waits for your confirmation:
+3. Initialize. This needs Node <!-- generated:version .node-version -->24<!-- /generated --> and a clean working tree. Run in a terminal, init reads the owner and repository from `origin`, asks for anything else, shows the plan and waits for your confirmation:
 
    ```bash
    node template/init.mjs
@@ -53,16 +53,19 @@ It is for anyone starting a service, a web app, a library or an MCP server who w
 
 ## Presets and features
 
+<!-- generated:presets-table -->
 | Preset | Features |
 |---|---|
-| `minimal` | none: the chassis only (hygiene, CI, security, community files, ADRs) |
+| `minimal` | none: the chassis only |
 | `go-api` | `go-service`, `architecture`, `release`, `devcontainer` |
 | `py-api` | `py-service`, `architecture`, `release`, `devcontainer` |
 | `fullstack-ts` | `ts-service`, `web`, `architecture`, `release`, `devcontainer` |
 | `library` | `ts-library`, `release`, `devcontainer` |
 | `mcp` | `mcp-server`, `release`, `devcontainer` |
 | `all` | every feature |
+<!-- /generated -->
 
+<!-- generated:features-table -->
 | Feature | What you get |
 |---|---|
 | `go-service` | Go HTTP service in Clean Architecture layers, standard library only; a test enforces the layer rules; golangci-lint; distroless image |
@@ -74,6 +77,7 @@ It is for anyone starting a service, a web app, a library or an MCP server who w
 | `architecture` | LikeC4 model of the system, with model rules as tests and an opt-in GitHub Pages site |
 | `release` | release-please: release pull requests, tags and `CHANGELOG.md` from Conventional Commits |
 | `devcontainer` | Dev Container with the toolchains of the features you selected |
+<!-- /generated -->
 
 Init deletes the features you did not select, keeps or removes the marked blocks in shared files such as workflows and this README, replaces the template's name and owner with yours, and deletes itself. [template/README.md](template/README.md) explains the mechanism and how to add a feature.
 
@@ -92,12 +96,12 @@ Deployment targets and infrastructure, databases and migrations, authentication,
 
 You need:
 
-- Node 24 (`.node-version`), for the scripts and every Node module.
+- Node <!-- generated:version .node-version -->24<!-- /generated --> (`.node-version`), for the scripts and every Node module.
 <!-- ultra:begin go-service -->
-- Go 1.26 (`services/api-go/go.mod`), and golangci-lint for the complete local check; without it, `verify.mjs` reports golangci-lint as skipped, and CI still runs it.
+- Go <!-- generated:version services/api-go/go.mod -->1.26<!-- /generated --> (`services/api-go/go.mod`), and golangci-lint <!-- generated:tool golangci-lint -->2.13.2<!-- /generated --> for the complete local check: `node scripts/tools.mjs install --local` installs it at that version. Without it, `verify.mjs` reports golangci-lint as skipped, and CI still runs it.
 <!-- ultra:end go-service -->
 <!-- ultra:begin py-service -->
-- Python 3.13 or newer and [uv](https://docs.astral.sh/uv/) (`services/api-py/.python-version`), which installs the rest.
+- Python <!-- generated:floor services/api-py/pyproject.toml -->3.13<!-- /generated --> or newer and [uv](https://docs.astral.sh/uv/) <!-- generated:tool uv -->0.12.18<!-- /generated --> (`services/api-py/.python-version`, `scripts/tools/tools.json`), which installs the rest.
 <!-- ultra:end py-service -->
 - The GitHub CLI, only to apply repository settings with `configure-github.mjs`.
 
@@ -130,19 +134,19 @@ Each toolchain version is pinned once, in the file named beside it above, so the
 - `scripts/check-facts.mjs` — holds every module that repeats a fact without serving it (the task rules, the API's default port) to the file that states it.
 <!-- ultra:end mcp-server|web|ts-library -->
 <!-- ultra:begin go-service -->
-- `services/api-go/` — Go task API in Clean Architecture layers. `go run ./cmd/api` there serves it on port 8080. [README](services/api-go/README.md)
+- `services/api-go/` — Go task API in Clean Architecture layers. `go run ./cmd/api` there serves it on port <!-- generated:contract config.PORT.default.value -->8080<!-- /generated -->. [README](services/api-go/README.md)
 <!-- ultra:end go-service -->
 <!-- ultra:begin ts-service -->
-- `services/api-ts/` — TypeScript task API with a pure domain core. `npm start` there serves it on port 8080. [README](services/api-ts/README.md)
+- `services/api-ts/` — TypeScript task API with a pure domain core. `npm start` there serves it on port <!-- generated:contract config.PORT.default.value -->8080<!-- /generated -->. [README](services/api-ts/README.md)
 <!-- ultra:end ts-service -->
 <!-- ultra:begin py-service -->
-- `services/api-py/` — Python task API, same routes and layers. `uv run --directory src python -m api_py.main` there serves it on port 8080. [README](services/api-py/README.md)
+- `services/api-py/` — Python task API, same routes and layers. `uv run --directory src python -m api_py.main` there serves it on port <!-- generated:contract config.PORT.default.value -->8080<!-- /generated -->. [README](services/api-py/README.md)
 <!-- ultra:end py-service -->
 <!-- ultra:begin mcp-server -->
 - `services/mcp-server/` — MCP server exposing the task API to an AI assistant. `npm start` there serves it over stdio, calling the task API at `TASK_API_URL`; the README shows how to register it with a client. [README](services/mcp-server/README.md)
 <!-- ultra:end mcp-server -->
 <!-- ultra:begin web -->
-- `apps/web/` — React single-page app, organised by feature. `npm run dev` there serves it at http://localhost:5173, with `/api` passed to a task service on port 8080. [README](apps/web/README.md)
+- `apps/web/` — React single-page app, organised by feature. `npm run dev` there serves it at http://localhost:5173, with `/api` passed to a task service on port <!-- generated:contract config.PORT.default.value -->8080<!-- /generated -->. [README](apps/web/README.md)
 <!-- ultra:end web -->
 <!-- ultra:begin ts-library -->
 - `packages/ts-library/` — TypeScript library published to npm. `npm run verify` there builds it and checks the package consumers would install. [README](packages/ts-library/README.md)

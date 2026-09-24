@@ -13,36 +13,40 @@ Weekly, grouped, as pull requests that must pass `verify` like any other.
 - **Dev Container features** — the toolchain features in `.devcontainer/devcontainer.json`.
 <!-- ultra:end devcontainer -->
 
-## Language versions — moved on purpose, all at once
+## Language versions — declared once, moved on purpose
 
-Dependabot holds these back on purpose. A language version is read in several places, and moving it in one place and not the others is how "works on my machine" starts. Move each one in a single pull request, everywhere it appears, and let `verify` prove it.
+Dependabot holds these back on purpose. Each is declared in one file; every other place that names it is a copy, and `check-hygiene` rule 17 fails the build and names each copy still on the old version. So move a language version by changing its declaration and then every copy the check names, in one pull request, and let `verify` prove it.
 
-- **Node** — `.node-version` (read by every `setup-node` step), `engines` in each `package.json`, the `node:` tag in each Node Dockerfile, the Dev Container feature, and the `@types/node` major, which describes the runtime and must never run ahead of it.
+- **Node** — `.node-version` (major <!-- generated:version .node-version -->24<!-- /generated -->), read by every `setup-node` step and by `scripts/agent-env.mjs`. Its copies: `engines` in each `package.json`, the `@types/node` major, the `node:` tag in each Node Dockerfile, and the Dev Container feature.
 <!-- ultra:begin go-service -->
-- **Go** — the `go` line in `services/api-go/go.mod` (read by `setup-go`), the `golang:` tag in its Dockerfile, and the Dev Container feature.
+- **Go** — the `go` line in `services/api-go/go.mod` (<!-- generated:version services/api-go/go.mod -->1.26<!-- /generated -->), read by `setup-go`. Its copies: the `golang:` tag in its Dockerfile and the Dev Container feature.
 <!-- ultra:end go-service -->
 <!-- ultra:begin py-service -->
-- **Python** — `services/api-py/.python-version` (read by uv), `requires-python` and mypy's `python_version` in `pyproject.toml`, the `python:` tag in its Dockerfile, and the Dev Container feature.
-- **uv** — `[tool.uv] required-version` in `services/api-py/pyproject.toml`, which uv itself enforces and every `setup-uv` step reads. It is a range within one minor release, because uv's minor releases can change behaviour before 1.0.
+- **Python** — `services/api-py/.python-version` (<!-- generated:version services/api-py/.python-version -->3.14<!-- /generated -->), read by uv; `requires-python` in `pyproject.toml` is the oldest version the service supports (<!-- generated:floor services/api-py/pyproject.toml -->3.13<!-- /generated -->), which mypy's `python_version` must equal. Its copies: the `python:` tag in its Dockerfile and the Dev Container feature.
 <!-- ultra:end py-service -->
 
-## Pinned by hand — check at every minor release
+## Pinned by hand — one manifest, moved by one command
 
-Nothing updates these, so they are part of the release checklist. Each is a version and, for a downloaded binary, a checksum taken from the release itself. `pins.yml` lists every one of them each week beside its latest release, from `scripts/check-pins.mjs`, whose tests fail when a workflow gains a pin the list does not have; it reports, and the move stays a person's.
+Dependabot cannot see a tool a workflow downloads by version, so each is pinned once, in `scripts/tools/tools.json`, with the SHA-256 of its release asset for every platform it is installed on. `scripts/tools.mjs` installs and runs them from there, in CI, in local checks and in an agent's session; `check-hygiene` rule 16 fails a version written into a workflow instead; `verify` fails when the copy on PATH is a different version; and `pins.yml` lists each one beside its latest release every week. The move stays a person's.
 
-- **gitleaks** — `GITLEAKS_VERSION` and `GITLEAKS_SHA256` in `.github/workflows/security.yml`.
-- **actionlint** — `ACTIONLINT_VERSION` and `ACTIONLINT_SHA256` in `.github/actions/setup-actionlint/action.yml`.
-- **Trivy** — `TRIVY_VERSION` and `TRIVY_SHA256` in the `image-scan` job of `.github/workflows/security.yml`, the SHA-256 taken from the release's `trivy_X.Y.Z_checksums.txt`.
-- **zizmor** — `ZIZMOR_VERSION` and `ZIZMOR_SHA256` in `.github/actions/setup-zizmor/action.yml`. The release publishes no checksum file; take the SHA-256 GitHub records for the asset: `gh api repos/zizmorcore/zizmor/releases/tags/vX.Y.Z --jq '.assets[] | select(.name == "zizmor-x86_64-unknown-linux-gnu.tar.gz") | .digest'`.
-<!-- ultra:begin go-service -->
-- **golangci-lint** — the `version:` input of its action in `.github/workflows/verify.yml`.
-- **govulncheck** — the `@v…` in the `go run` line of `.github/workflows/security.yml`.
-<!-- ultra:end go-service -->
-<!-- ultra:begin py-service -->
-- **pip-audit** — the `pip-audit==…` in `.github/workflows/security.yml`.
-<!-- ultra:end py-service -->
-<!-- ultra:begin mcp-server -->
-- **mcp-publisher** — the release URL and its SHA-256 in `.github/workflows/mcp-publish.yml`.
-<!-- ultra:end mcp-server -->
+<!-- generated:tools-table -->
+| Tool | Version | Needed | Checksum |
+|---|---|---|---|
+| [actionlint](https://github.com/rhysd/actionlint/releases) | 1.7.12 | everywhere | the release's checksum file |
+| [zizmor](https://github.com/zizmorcore/zizmor/releases) | 1.30.1 | everywhere | the digest GitHub records for each asset |
+| [golangci-lint](https://github.com/golangci/golangci-lint/releases) | 2.13.2 | with a Go module | the release's checksum file |
+| [uv](https://github.com/astral-sh/uv/releases) | 0.12.18 | with a Python module | the `.sha256` file beside each asset |
+| [gitleaks](https://github.com/gitleaks/gitleaks/releases) | 8.30.1 | in CI only | the release's checksum file |
+| [trivy](https://github.com/aquasecurity/trivy/releases) | 0.74.0 | in CI only | the release's checksum file |
+| [mcp-publisher](https://github.com/modelcontextprotocol/registry/releases) | 1.8.1 | in CI only | the digest GitHub records for each asset |
+| [govulncheck](https://github.com/golang/vuln/tags) | 1.8.0 | in CI only | none: run as `go run golang.org/x/vuln/cmd/govulncheck@v1.8.0` |
+| [pip-audit](https://pypi.org/project/pip-audit/) | 2.10.1 | in CI only | none: run as `uvx pip-audit==2.10.1` |
+<!-- /generated -->
 
-To move one: read the tool's release notes, take the checksum from the release — a published checksum file, or the asset's digest (`gh api repos/OWNER/REPO/releases/tags/vX.Y.Z --jq '.assets[] | {name, digest}'`) — change the version and checksum in one pull request, and let CI prove the new binary works. Never take a checksum from anywhere but the release: the point of pinning one is that a replaced download fails.
+To move one, read its release notes, then:
+
+```bash
+node scripts/tools.mjs bump <tool> [X.Y.Z]   # the latest release when no version is given
+```
+
+`bump` takes each new checksum from the release itself — its checksum file, a checksum beside each asset, or the digest GitHub records — and never from anywhere else: the point of pinning one is that a replaced download fails. It needs `GH_TOKEN` for a digest GitHub records. Run `node scripts/verify.mjs`: rule 17 names any other copy of the version, such as the golangci-lint version the Dev Container's go feature is given, and CI proves the new binary works.

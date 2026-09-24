@@ -15,6 +15,7 @@
   "config": {
     "$comment": "Every environment variable a task service reads. An unset or empty variable reads as its default. Each value under `accept` starts the service with `effective` in effect; each under `refuse` is refused as `startup` says. `{port}` is a free port, and `{port:fullwidth}` and `{port:arabic-indic}` write it in another script's digits, which Go's strconv.Atoi refuses and so every service must. The default of a variable that `binds` a port is checked by CI's image probe only, so no check binds that port on a developer's machine. SHUTDOWN_TIMEOUT takes Go's duration syntax, up to the longest duration Go can hold, and is reported in milliseconds.",
     "PORT": {
+      "meaning": "The TCP port it listens on, from 1 to 65535, in the digits 0 to 9 as Go's strconv.Atoi reads them",
       "reportedAs": "port",
       "binds": true,
       "default": { "value": "8080", "effective": 8080 },
@@ -26,6 +27,7 @@
       "refuse": ["0", "-1", "65536", "99999999999999999999", "{port}.0", " {port}", "{port} ", "{port}\n", "0x1F90", "8e3", "8_080", "http", "{port:fullwidth}", "{port:arabic-indic}"]
     },
     "SHUTDOWN_TIMEOUT": {
+      "meaning": "How long requests in flight may finish after SIGTERM or SIGINT, in Go's duration syntax, such as 1m30s, .5s or 500ms",
       "reportedAs": "shutdownTimeoutMs",
       "default": { "value": "10s", "effective": 10000 },
       "accept": [

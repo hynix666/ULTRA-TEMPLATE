@@ -23,6 +23,8 @@
  *   9. .claude/settings.json, when tracked, parses, and every hook in it is a command whose files in
  *      the repository ($CLAUDE_PROJECT_DIR/…) are tracked. A hook that names a missing script fails in
  *      every session that starts, far from the change that broke it.
+ *  10. Every generated block in a Markdown file (scripts/generate-docs.mjs) says what its source says
+ *      now, and names a source that is here. A value restated by hand is how a README goes stale.
  *
  *   node scripts/check-docs.mjs
  *
@@ -32,6 +34,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { DocsError, regenerate } from "./generate-docs.mjs";
 
 export const CANONICAL = "AGENTS.md";
 export const IMPORT_FILE = "CLAUDE.md";
@@ -44,6 +47,25 @@ export const MAX_POINTER_LINES = 20;
 export const WRONG_NAME = "AGENT.MD";
 /** Copilot's own customization surface: task-shaped wrappers, never a second set of rules. */
 export const CLAUDE_SETTINGS = ".claude/settings.json";
+
+/** Rule 10: every generated block matches its source, which is here. */
+function checkGenerated(root, tracked, failures) {
+  const read = (path) => {
+    if (!tracked.includes(path) || !existsSync(join(root, path))) throw new DocsError(`${path} is not here`);
+    return readFileSync(join(root, path), "utf8");
+  };
+  for (const file of tracked.filter((p) => p.endsWith(".md") && existsSync(join(root, p)))) {
+    const text = readFileSync(join(root, file), "utf8");
+    if (!text.includes("<!-- generated:")) continue;
+    try {
+      const { stale } = regenerate(text, read, file);
+      if (stale.length > 0) failures.push(`\`${file}\` has generated block(s) its source no longer says: ${stale.join(", ")}. Run node scripts/generate-docs.mjs.`);
+    } catch (err) {
+      if (!(err instanceof DocsError)) throw err;
+      failures.push(`${err.message}. A generated block must name a source this project keeps.`);
+    }
+  }
+}
 
 /** Every way a Claude Code settings object's hooks are malformed or name a file that is not tracked. */
 export function hookProblems(settings, tracked) {
@@ -286,6 +308,7 @@ export function checkDocs(root = process.cwd()) {
   }
 
   checkVendorFiles(root, tracked, failures);
+  checkGenerated(root, tracked, failures);
   if (tracked.includes(CLAUDE_SETTINGS)) {
     try {
       failures.push(...hookProblems(JSON.parse(read(CLAUDE_SETTINGS)), tracked).map((problem) => `\`${CLAUDE_SETTINGS}\` ${problem}.`));

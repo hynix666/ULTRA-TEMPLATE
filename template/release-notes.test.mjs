@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
-import { diffTrees, groupByPreset, render, walk } from "./release-notes.mjs";
+import { ROOT } from "./init.mjs";
+import { diffTrees, groupByPreset, NOTES_DIR, render, requiredNotes, walk } from "./release-notes.mjs";
 
 /** A generated project, as a directory of files. */
 function tree(t, files) {
@@ -75,4 +76,24 @@ test("the first release has nothing to compare against, so it says how to start 
   assert.match(notes, /^The first release of this template\./);
   assert.match(notes, /node template\/init\.mjs --list/);
   assert.doesNotMatch(notes, /Changes since|template-update/);
+});
+
+test("a release's notes for adopters come first, and a minor or major release must have them", () => {
+  const notes = "Rule 17 is new: a toolchain version copied anywhere must match its declaration.";
+  const out = render({ to: "v2.1.0", from: "v2.0.0", groups: [], notes });
+  assert.ok(out.indexOf("## What you need to know") < out.indexOf("## What changes in generated projects"));
+  assert.ok(out.includes(notes));
+  assert.ok(!render({ to: "v2.0.1", from: "v2.0.0", groups: [] }).includes("What you need to know"));
+  assert.equal(requiredNotes("2.1.0"), `${NOTES_DIR}/v2.1.0.md`);
+  assert.equal(requiredNotes("3.0.0"), `${NOTES_DIR}/v3.0.0.md`);
+  assert.equal(requiredNotes("2.1.3"), null, "a patch release needs none");
+  assert.equal(requiredNotes("1.1.0"), null, "nor a release from before the notes began");
+});
+
+test("this version has the notes it needs", () => {
+  const { version } = JSON.parse(readFileSync(join(ROOT, "template/features.json"), "utf8"));
+  const file = requiredNotes(version);
+  if (file === null) return;
+  assert.ok(existsSync(join(ROOT, file)), `${file} is missing: a minor or major release says what adopters need to know`);
+  assert.ok(readFileSync(join(ROOT, file), "utf8").trim().length > 0, `${file} is empty`);
 });

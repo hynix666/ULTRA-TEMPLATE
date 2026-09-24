@@ -50,7 +50,7 @@ The same layers as the services, with MCP as the transport: `src/domain` is pure
 <!-- ultra:begin web -->
 ### apps/web
 
-Code flows one way: `src/lib` (shared) → `src/features/<name>` → `src/app`. A feature never imports another feature or `src/app`, and `src/app` uses a feature only through its `index.ts`; `scripts/check-boundaries.mjs` enforces it. A new capability is a new feature folder with its own `api.ts`, `model.ts` and `components/`. API responses are validated in the feature's `model.ts` before components use them. Component tests stub `fetch` and render with Testing Library in happy-dom. The dev server proxies `/api` to port 8080.
+Code flows one way: `src/lib` (shared) → `src/features/<name>` → `src/app`. A feature never imports another feature or `src/app`, and `src/app` uses a feature only through its `index.ts`; `scripts/check-boundaries.mjs` enforces it. A new capability is a new feature folder with its own `api.ts`, `model.ts` and `components/`. API responses are validated in the feature's `model.ts` before components use them. Component tests stub `fetch` and render with Testing Library in happy-dom. The dev server proxies `/api` to port <!-- generated:contract config.PORT.default.value -->8080<!-- /generated -->, the task services' default.
 <!-- ultra:end web -->
 
 <!-- ultra:begin ts-library -->
