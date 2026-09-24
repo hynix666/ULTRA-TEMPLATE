@@ -8,7 +8,9 @@ describe("check-boundaries", () => {
   it("keeps features out of each other and out of the app", () => {
     expect(checkFile("src/features/tasks/api.ts", 'import { x } from "../users/api.ts";')).toHaveLength(1);
     expect(checkFile("src/features/tasks/api.ts", 'import { App } from "../../app/app.tsx";')).toHaveLength(1);
-    expect(checkFile("src/features/tasks/api.ts", 'import { requestJson } from "../../lib/http.ts";\nimport { z } from "zod";')).toEqual([]);
+    expect(checkFile("src/features/tasks/api.ts", 'import { requestJson } from "../../lib/http.ts";\nimport { z } from "zod";')).toEqual(
+      [],
+    );
   });
 
   it("lets the app use a feature only through its index", () => {

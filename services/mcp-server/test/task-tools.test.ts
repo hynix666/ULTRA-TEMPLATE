@@ -25,8 +25,14 @@ test("a move the API would refuse is refused here, with the moves that would wor
 
 test("an unknown id and an unknown status each fail before the call", async () => {
   const gateway = fakeGateway([task({ id: "t1" })]);
-  await assert.rejects(() => moveTask(gateway, "t9", "in_progress"), (err: DomainError) => err.code === "NOT_FOUND");
-  await assert.rejects(() => moveTask(gateway, "t1", "archived"), (err: DomainError) => err.code === "UNKNOWN_STATUS");
+  await assert.rejects(
+    () => moveTask(gateway, "t9", "in_progress"),
+    (err: DomainError) => err.code === "NOT_FOUND",
+  );
+  await assert.rejects(
+    () => moveTask(gateway, "t1", "archived"),
+    (err: DomainError) => err.code === "UNKNOWN_STATUS",
+  );
 });
 
 test("listing passes the gateway's answer through untouched", async () => {
@@ -37,5 +43,8 @@ test("listing passes the gateway's answer through untouched", async () => {
 test("getting a task answers with it, and an unknown id is NOT_FOUND rather than a gateway failure", async () => {
   const gateway = fakeGateway([task({ id: "t1" })]);
   assert.deepEqual(await getTask(gateway, "t1"), task({ id: "t1" }));
-  await assert.rejects(() => getTask(gateway, "t9"), (err: DomainError) => err.code === "NOT_FOUND" && /list_tasks/.test(err.message));
+  await assert.rejects(
+    () => getTask(gateway, "t9"),
+    (err: DomainError) => err.code === "NOT_FOUND" && /list_tasks/.test(err.message),
+  );
 });

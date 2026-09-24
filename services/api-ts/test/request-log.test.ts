@@ -28,7 +28,15 @@ test("a usable request id is echoed, and the request is logged once", async (t) 
   const res = await fetch(`${base}/api/tasks/t1/status?x=secret`, { method: "PATCH", headers: { "x-request-id": "abc-123.X_y" } });
   assert.equal(res.headers.get("x-request-id"), "abc-123.X_y");
   assert.deepEqual(lines, [
-    { level: "info", msg: "request", method: "PATCH", path: "/api/tasks/t1/status", status: 409, durationMs: 1.5, requestId: "abc-123.X_y" },
+    {
+      level: "info",
+      msg: "request",
+      method: "PATCH",
+      path: "/api/tasks/t1/status",
+      status: 409,
+      durationMs: 1.5,
+      requestId: "abc-123.X_y",
+    },
   ]);
 });
 
@@ -38,5 +46,8 @@ test("a missing or unsafe request id is replaced", async (t) => {
     const res = await fetch(`${base}/healthz`, sent === undefined ? {} : { headers: { "x-request-id": sent } });
     assert.equal(res.headers.get("x-request-id"), "generated-1", String(sent));
   }
-  assert.deepEqual(lines.map((line) => line["requestId"]), ["generated-1", "generated-1", "generated-1"]);
+  assert.deepEqual(
+    lines.map((line) => line["requestId"]),
+    ["generated-1", "generated-1", "generated-1"],
+  );
 });

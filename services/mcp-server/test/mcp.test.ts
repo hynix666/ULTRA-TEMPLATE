@@ -38,8 +38,14 @@ test("every tool is advertised with a schema a client can read", async (t) => {
   assert.deepEqual(tools.map((tool) => tool.name).sort(), ["create_task", "get_task", "list_tasks", "move_task"]);
   const move = tools.find((tool) => tool.name === "move_task");
   assert.deepEqual(move?.inputSchema.required, ["id", "status"]);
-  assert.ok(tools.every((tool) => (tool.description ?? "") !== ""), "a tool with no description cannot be chosen");
-  assert.ok(tools.every((tool) => tool.outputSchema?.type === "object"), "every tool declares what its structured result holds");
+  assert.ok(
+    tools.every((tool) => (tool.description ?? "") !== ""),
+    "a tool with no description cannot be chosen",
+  );
+  assert.ok(
+    tools.every((tool) => tool.outputSchema?.type === "object"),
+    "every tool declares what its structured result holds",
+  );
 });
 
 test("each tool tells a client whether it only reads", async (t) => {
@@ -51,7 +57,10 @@ test("each tool tells a client whether it only reads", async (t) => {
     assert.equal(hints[name]?.readOnlyHint, false, name);
     assert.equal(hints[name]?.idempotentHint, false, name);
   }
-  assert.ok(tools.every((tool) => tool.annotations?.destructiveHint === false), "no tool here deletes anything");
+  assert.ok(
+    tools.every((tool) => tool.annotations?.destructiveHint === false),
+    "no tool here deletes anything",
+  );
 });
 
 test("every result carries structured content that says what the text says", async (t) => {

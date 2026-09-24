@@ -11,7 +11,10 @@ afterEach(() => {
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status });
 
 it("lists tasks and offers only the moves the API accepts", async () => {
-  vi.stubGlobal("fetch", vi.fn(async () => json([{ id: "a", title: "ship it", status: "todo" }])));
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () => json([{ id: "a", title: "ship it", status: "todo" }])),
+  );
   render(<TaskBoard />);
 
   expect(await screen.findByText("ship it")).toBeTruthy();
@@ -38,7 +41,10 @@ it("moves a task, then reloads the list", async () => {
 });
 
 it("shows the service's error message when a request fails", async () => {
-  vi.stubGlobal("fetch", vi.fn(async () => json({ error: "service unavailable" }, 503)));
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () => json({ error: "service unavailable" }, 503)),
+  );
   render(<TaskBoard />);
 
   expect((await screen.findByRole("alert")).textContent).toBe("service unavailable");

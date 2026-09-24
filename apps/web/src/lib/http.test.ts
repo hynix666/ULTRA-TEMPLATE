@@ -17,11 +17,20 @@ describe("requestJson", () => {
     const fetch = vi.fn(async () => new Response('{"id":"a"}', { status: 201 }));
     vi.stubGlobal("fetch", fetch);
     expect(await requestJson("/api/tasks", { method: "POST", body: { title: "x" } })).toEqual({ id: "a" });
-    expect(fetch).toHaveBeenCalledWith("/api/tasks", { method: "POST", headers: { "content-type": "application/json" }, body: '{"title":"x"}' });
+    expect(fetch).toHaveBeenCalledWith("/api/tasks", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: '{"title":"x"}',
+    });
   });
 
   it("throws the service's message when the request fails", async () => {
-    vi.stubGlobal("fetch", vi.fn(async () => new Response('{"error":"status transition not allowed"}', { status: 409 })));
-    await expect(requestJson("/api/tasks/a/status", { method: "PATCH", body: { status: "done" } })).rejects.toThrow("status transition not allowed");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response('{"error":"status transition not allowed"}', { status: 409 })),
+    );
+    await expect(requestJson("/api/tasks/a/status", { method: "PATCH", body: { status: "done" } })).rejects.toThrow(
+      "status transition not allowed",
+    );
   });
 });
