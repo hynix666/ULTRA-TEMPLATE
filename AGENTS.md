@@ -78,7 +78,7 @@ The contract's move cases state every pair of statuses as that file does, so a t
 A module that repeats a fact without serving it (the task rules, the port a task service listens on by default) prints its copies with `npm run facts`, and `scripts/check-facts.mjs` compares them with the files that state them.
 <!-- ultra:end mcp-server|web|ts-library -->
 <!-- ultra:begin ts-service|mcp-server|web|ts-library|architecture -->
-Every Node module lints and formats with Biome: `npm run lint` checks both, and `npx biome format --write .` in the module fixes the layout. A rule is switched off only in the module's `biome.jsonc`, with the reason beside it ([ADR-0012](docs/adr/0012-lint-and-format-typescript-with-biome.md)).
+Every Node module lints and formats with Biome, with the settings in the root `biome.jsonc`, which each module's `biome.jsonc` extends: `npm run lint` checks both, and `npx biome format --write .` in the module fixes the layout. A setting for every module changes in the root file; a rule is switched off for one module only in its own `biome.jsonc`, with the reason beside it ([ADR-0012](docs/adr/0012-lint-and-format-typescript-with-biome.md)).
 <!-- ultra:end ts-service|mcp-server|web|ts-library|architecture -->
 
 ## Skills
