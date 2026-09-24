@@ -1,0 +1,33 @@
+# Report-only: which hand-pinned tools have a newer release.
+#
+# Dependabot moves actions, base images and module dependencies. The tools downloaded by version and
+# checksum in the workflows it cannot see, so each would go stale without anyone deciding it should.
+# This lists them weekly in the job summary. It never moves a pin: that takes reading the release and
+# taking its checksum from it (docs/toolchain-updates.md). It fails only when a lookup could not be made.
+name: pins
+
+on:
+  schedule:
+    - cron: "23 6 * * 2"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .node-version
+      - name: Hand-pinned tools against their latest releases
+        env:
+          GH_TOKEN: ${{ github.token }}
+        # `shell: bash` runs with pipefail, so a lookup that failed fails the step through the pipe.
+        shell: bash
+        run: node scripts/check-pins.mjs | tee -a "$GITHUB_STEP_SUMMARY"
