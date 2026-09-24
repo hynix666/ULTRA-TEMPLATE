@@ -17,7 +17,8 @@
  * check whose manifest names a `tool` that is not on PATH, or `requires` a condition this machine lacks
  * (Go's race detector needs cgo and a C compiler), is reported as SKIPPED by name, and the module's CI
  * job, which has both, always runs it: in GitHub Actions a skip is a failure, so a job that lost a tool
- * cannot pass without running the check.
+ * cannot pass without running the check. So is each command a chassis tool's check `uses` when it is on
+ * PATH and quietly goes without otherwise (scripts/tools/tools.json): its pass covers less without it.
  *
  * Exit 0 everything passed · 1 something failed · 2 a module name that is unknown or not present.
  */
@@ -25,7 +26,7 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
 import { available, checkNodeVersion, e2ePartner, ModuleError, presentModules, REQUIREMENTS, ROOT, run, skipOutcome, TOOLCHAINS } from "./modules.mjs";
-import { installedVersion, loadTools, TOOLS_FILE, versionProblem } from "./tools.mjs";
+import { installedVersion, loadTools, missingHelpers, TOOLS_FILE, versionProblem } from "./tools.mjs";
 
 const { values: flags, positionals: requested } = parseArgs({
   allowPositionals: true,
@@ -61,7 +62,14 @@ function chassis() {
     const found = flags["dry-run"] ? tool.version : installedVersion(name, tools);
     if (found === null) record(`chassis: ${name}`, "skipped", `not on PATH; its own CI job runs it, and node scripts/tools.mjs install ${name} installs it here`);
     else if (versionProblem(name, found, tools)) record(`chassis: ${name}`, "fail", versionProblem(name, found, tools));
-    else step(`chassis: ${name}`, tool.check);
+    else {
+      step(`chassis: ${name}`, tool.check);
+      if (flags["dry-run"]) continue;
+      for (const helper of missingHelpers(tool)) {
+        const where = skipOutcome() === "fail" ? "this CI job must run them" : "CI runs them";
+        record(`chassis: ${name} with ${helper}`, skipOutcome(), `${helper} is not on PATH, so ${name} ran without the rules that need it; ${where}`);
+      }
+    }
   }
 }
 

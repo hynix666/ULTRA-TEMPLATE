@@ -7,7 +7,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { bump, command, install, loadTools, localPlan, localTools, platform, toolsFor, validateTools } from "../scripts/tools.mjs";
+import { bump, command, install, loadTools, localPlan, localTools, missingHelpers, platform, toolsFor, validateTools } from "../scripts/tools.mjs";
 
 /** A tar.gz holding one executable, its bytes, and a fetch that serves it at `url`. */
 function release(t, url, member = "demo") {
@@ -61,6 +61,19 @@ test("an entry that says nothing about where its checksum comes from, or is both
   assert.match(found, /either downloaded \(`platforms`\) or run by version/);
   assert.match(found, /`checksums` must say where the release publishes its checksum/);
   assert.match(validateTools({ x: { version: "1.2", for: "moon", releases: {}, run: ["x"] } }).join("\n"), /version` must be X\.Y\.Z.*\n.*`for` must be one of.*\n.*`releases` must name/);
+});
+
+test("a command a check uses only when it is on PATH is named when it is not, so the pass is not read as the whole check", () => {
+  const check = { check: ["demo", "--strict"], uses: ["helper"] };
+  const url = "https://example.test/x.tar.gz";
+  assert.deepEqual(validateTools(tool(url, "a".repeat(64), check)), []);
+  assert.deepEqual(missingHelpers(check, () => false), ["helper"]);
+  assert.deepEqual(missingHelpers(check, () => true), []);
+  assert.deepEqual(missingHelpers({ check: ["demo"] }, () => false), [], "a check that uses nothing is missing nothing");
+  for (const uses of [[], ["a helper"], "helper", [""]]) {
+    assert.match(validateTools(tool(url, "a".repeat(64), { ...check, uses })).join(), /`uses` lists the commands a tool's `check` runs/, JSON.stringify(uses));
+  }
+  assert.match(validateTools(tool(url, "a".repeat(64), { uses: ["helper"] })).join(), /`uses` lists/, "a tool with no check uses nothing");
 });
 
 test("a tool run by version is run with the pinned version filled in", () => {

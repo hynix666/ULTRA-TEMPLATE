@@ -83,6 +83,8 @@ jobs:
         run: |
           node --version
           node scripts/agent-env.mjs --force
+          # The file is written by the line above, so shellcheck cannot follow it.
+          # shellcheck source=/dev/null
           . "$CLAUDE_ENV_FILE"
           node scripts/verify.mjs --no-modules
 

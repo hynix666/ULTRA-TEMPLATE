@@ -120,7 +120,7 @@ Each toolchain version is pinned once, in the file named beside it above, so the
    node scripts/verify.mjs <module>    # the chassis plus the named modules only
    ```
 
-   It runs each module's own checks and tests, and the API contract against every task service present, on the Node major `.node-version` names, and fails on any other. A check it cannot run fails, and the two it may skip, golangci-lint and Go's race detector where there is no C compiler, are reported as skipped by name, never as passed. A few checks run only in CI, because they need a container engine, a network service or a CI-only tool: actionlint and zizmor on the workflows, `npm audit signatures`, building and starting each container image, and the report-only scans in `security.yml`.
+   It runs each module's own checks and tests, and the API contract against every task service present, on the Node major `.node-version` names, and fails on any other. A check it cannot run fails. One whose tool or condition this machine lacks is reported as skipped by name, never as passed: a pinned tool that is not installed (`node scripts/tools.mjs install --local` installs them), Go's race detector where there is no C compiler, and actionlint's shell-script rules where there is no shellcheck. A few checks run only in CI, because they need a container engine or a network service: `npm audit signatures`, building and starting each container image, and the report-only scans in `security.yml`.
 
 3. Start what you are working on. Each module's entry under *What's here* names the command that starts it.
 

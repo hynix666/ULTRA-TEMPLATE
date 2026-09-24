@@ -58,6 +58,9 @@ export function validateTools(tools) {
       say("`checksums` must say where the release publishes its checksum: file, sidecar or githubDigest");
     }
     if ("check" in tool && (!Array.isArray(tool.check) || tool.check.length === 0 || tool.for !== "chassis")) say("`check` is the command verify runs for a chassis tool");
+    if ("uses" in tool && (!("check" in tool) || !Array.isArray(tool.uses) || tool.uses.length === 0 || !tool.uses.every((c) => typeof c === "string" && /^[\w.-]+$/.test(c)))) {
+      say("`uses` lists the commands a tool's `check` runs when they are on PATH and quietly goes without otherwise");
+    }
     for (const [feature, option] of Object.entries(tool.devcontainer ?? {})) {
       if (typeof option !== "string" || option === "") say(`\`devcontainer.${feature}\` names the Dev Container feature option that sets this tool's version`);
     }
@@ -127,6 +130,14 @@ export function command(name, args = [], tools = loadTools()) {
 }
 
 /** The version a tool on PATH reports, or null when it is not on PATH. Reads the first X.Y.Z it prints. */
+/**
+ * The commands a tool's check would run but cannot find. Such a check still passes without them, having
+ * checked less, so verify names each one as a skip rather than letting the pass stand for the whole check.
+ */
+export function missingHelpers(tool, has = (command) => spawnSync(command, ["--version"], { stdio: "ignore" }).status === 0) {
+  return (tool.uses ?? []).filter((command) => !has(command));
+}
+
 export function installedVersion(name, tools = loadTools()) {
   const tool = need(tools, name);
   if (!tool.versionCommand) return null;

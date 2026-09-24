@@ -1,6 +1,6 @@
 # ADR-0015: Hand-pinned tools live in one manifest
 
-**Status:** Accepted, amends [ADR-0003](0003-pin-third-party-code.md) · **Date:** 2026-09-24
+**Status:** Accepted, amends [ADR-0003](0003-pin-third-party-code.md) and [ADR-0011](0011-what-local-verify-guarantees.md) · **Date:** 2026-09-24
 
 ## Context
 
@@ -13,8 +13,9 @@ Every hand-pinned tool is declared once, in `scripts/tools/tools.json`: its vers
 - Hygiene rule 16 fails a version written into a workflow or action instead.
 - Hygiene rule 17 holds each toolchain version's copies to its declaration, and the Dev Container's golangci-lint and uv to the manifest.
 - `verify` fails when a tool on PATH is not the pinned version, and names the command that installs it.
+- A tool whose check runs another command only when it is on PATH lists it under `uses`, and `verify` reports each one missing as a skip, which fails in CI. actionlint checks each `run:` script with shellcheck this way; a runner that had shellcheck turned a workflow red that `verify` had passed on a machine without it.
 
-zizmor's arm64 and macOS assets are not pinned: its release publishes no checksum file, and GitHub's recorded digest could not be read from where this was written. `install --local` reports that and installs the rest.
+shellcheck itself is not pinned yet: CI uses the one GitHub's runners carry, and a pin needs the digest GitHub records for each asset, which could not be read from where this was written. zizmor's arm64 and macOS assets are not pinned for the same reason: its release publishes no checksum file, and GitHub's recorded digest could not be read from where this was written. `install --local` reports that and installs the rest.
 
 ## Alternatives considered
 
