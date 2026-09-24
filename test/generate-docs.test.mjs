@@ -20,19 +20,23 @@ const read = (path) => {
   return files[path];
 };
 
-test("inline blocks take a value from the file they name", () => {
-  const text = [
-    "Node <!-- generated:version .node-version -->?<!-- /generated -->",
-    "Go <!-- generated:version services/api/go.mod -->?<!-- /generated -->",
-    "Python <!-- generated:floor svc/pyproject.toml -->?<!-- /generated -->",
-    "Port <!-- generated:contract config.PORT.default.value -->?<!-- /generated -->",
-    "Cap <!-- generated:contract limits.maxBodyBytes bytes -->?<!-- /generated -->",
-    "Title <!-- generated:rules maxTitleLength -->?<!-- /generated -->",
-    "Lint <!-- generated:tool lint -->?<!-- /generated -->",
-  ].join("\n");
-  const { text: out, stale } = regenerate(text, read);
-  assert.equal(stale.length, 7);
-  assert.deepEqual(out.split("\n").map((line) => line.replace(/<!--[^>]*-->/g, "")), ["Node 24", "Go 1.26", "Python 3.13", "Port 8080", "Cap 1 MiB", "Title 200", "Lint 1.2.3"]);
+test("inline blocks take a value from the file they name, and keep both of their comments", () => {
+  const blocks = [
+    ["version .node-version", "24"],
+    ["version services/api/go.mod", "1.26"],
+    ["floor svc/pyproject.toml", "3.13"],
+    ["contract config.PORT.default.value", "8080"],
+    ["contract limits.maxBodyBytes bytes", "1 MiB"],
+    ["rules maxTitleLength", "200"],
+    ["tool lint", "1.2.3"],
+  ];
+  const line = (args, content) => `x <!-- generated:${args} -->${content}<!-- /generated -->`;
+  const { text: out, stale } = regenerate(blocks.map(([args]) => line(args, "?")).join("\n"), read);
+  assert.equal(stale.length, blocks.length);
+  assert.deepEqual(
+    out.split("\n"),
+    blocks.map(([args, value]) => line(args, value)),
+  );
   assert.deepEqual(regenerate(out, read).stale, [], "a second pass finds nothing stale");
 });
 
