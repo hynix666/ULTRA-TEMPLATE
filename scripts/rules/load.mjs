@@ -1,0 +1,14 @@
+/**
+ * Reads scripts/rules/task-rules.json, the one statement of the task rules. Lives beside the file so
+ * that every check that needs the rules has them, whichever modules a project kept.
+ */
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+
+export const RULES_FILE = join(dirname(fileURLToPath(import.meta.url)), "task-rules.json");
+
+export function loadRules(file = RULES_FILE) {
+  const { $comment, ...rules } = JSON.parse(readFileSync(file, "utf8"));
+  return rules;
+}

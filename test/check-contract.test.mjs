@@ -3,8 +3,8 @@
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import { test } from "node:test";
-import { encodeBody, judge, loadCases, runCases } from "../scripts/check-contract.mjs";
-import { loadRules } from "../scripts/check-rules.mjs";
+import { checkSpec, encodeBody, judge, loadCases, loadSpec, runCases } from "../scripts/check-contract.mjs";
+import { loadRules } from "../scripts/rules/load.mjs";
 
 // The moves the fake service allows unless `mistakes.moves` says otherwise.
 const MOVES = { todo: ["in_progress"], in_progress: ["todo", "done"], done: [] };
@@ -133,4 +133,41 @@ test("the committed cases are well formed and each name is unique", () => {
   }
   // Large bodies are described, not stored: the file stays small and reviewable.
   assert.equal(JSON.parse(encodeBody({ title: { repeat: "ab", times: 3 } })).title, "ababab");
+});
+
+test("the OpenAPI document agrees with the contract cases and the task rules", () => {
+  assert.deepEqual(checkSpec(loadSpec(), loadCases(), loadRules()), []);
+});
+
+test("every way the OpenAPI document can disagree is reported", () => {
+  const spec = () => structuredClone(loadSpec());
+  const cases = loadCases();
+  const rules = loadRules();
+
+  // A case answered with a status the document does not list.
+  const unlisted = spec();
+  delete unlisted.paths["/api/tasks/{id}/status"].patch.responses["409"];
+  assert.match(checkSpec(unlisted, cases, rules).join("\n"), /case "move refuses a skipped step": PATCH \/api\/tasks\/\{id\}\/status answers 409, which the document does not list/);
+
+  // A response no case exercises.
+  const unexercised = spec();
+  unexercised.paths["/api/tasks"].get.responses["500"] = { description: "never happens" };
+  assert.match(checkSpec(unexercised, cases, rules).join("\n"), /lists 500 for GET \/api\/tasks, which no case exercises/);
+
+  // A method a path does not list must be answered 405.
+  const extra = [...cases, { name: "delete a task", method: "DELETE", path: "/api/tasks/{id}", status: 204 }];
+  assert.match(checkSpec(spec(), extra, rules).join("\n"), /case "delete a task" sends DELETE to \/api\/tasks\/\{id\}, which the document does not list, and expects 204 rather than 405/);
+
+  // The task's fields are the ones every service answers with.
+  const fields = spec();
+  fields.components.schemas.Task.properties.priority = { type: "integer" };
+  assert.match(checkSpec(fields, cases, rules).join("\n"), /Task schema has fields createdAt,id,priority,status,title,updatedAt, expected createdAt,id,status,title,updatedAt/);
+
+  // The statuses and the title length are the rules'.
+  const statuses = spec();
+  statuses.components.schemas.Status.enum = ["todo", "done"];
+  assert.match(checkSpec(statuses, cases, rules).join("\n"), /Status enum is \["todo","done"\], expected \["todo","in_progress","done"\]/);
+  const title = spec();
+  title.components.schemas.CreateTask.properties.title.maxLength = 100;
+  assert.match(checkSpec(title, cases, rules).join("\n"), /CreateTask title maxLength is 100, expected 200/);
 });

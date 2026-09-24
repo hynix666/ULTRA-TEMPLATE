@@ -16,20 +16,14 @@
  * Exit 0 every module agrees · 1 a module disagrees · 2 a module could not be asked, or a name is not a
  * module that carries the rules.
  */
-import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { presentModules, ROOT, run } from "./modules.mjs";
+import { loadRules } from "./rules/load.mjs";
 
-export const RULES_FILE = join(ROOT, "scripts", "rules", "task-rules.json");
 export const RULE_MODULES = ["mcp-server", "web", "ts-library"];
 /** What every module must state. A module that validates no titles leaves out maxTitleLength. */
 const REQUIRED = ["statuses", "transitions"];
-
-export const loadRules = (file = RULES_FILE) => {
-  const { $comment, ...rules } = JSON.parse(readFileSync(file, "utf8"));
-  return rules;
-};
 
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 const sorted = (list) => [...list].sort();

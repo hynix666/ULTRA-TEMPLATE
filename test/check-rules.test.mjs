@@ -2,7 +2,8 @@
 // nothing, since it passes just as well when it compares nothing.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { compareRules, loadRules } from "../scripts/check-rules.mjs";
+import { compareRules } from "../scripts/check-rules.mjs";
+import { loadRules } from "../scripts/rules/load.mjs";
 
 const rules = loadRules();
 const copy = () => structuredClone(rules);

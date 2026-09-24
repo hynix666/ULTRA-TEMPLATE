@@ -26,10 +26,69 @@ import { pathToFileURL } from "node:url";
 import { presentModules, ROOT } from "./modules.mjs";
 
 export const CASES_FILE = join(ROOT, "scripts", "contract", "tasks-api.json");
+export const SPEC_FILE = join(ROOT, "scripts", "contract", "openapi.json");
+/** The fields of a task, as every service answers with them and the OpenAPI document states them. */
+export const TASK_FIELDS = ["createdAt", "id", "status", "title", "updatedAt"];
 export const TASK_SERVICES = ["go-service", "ts-service", "py-service"];
 const STARTUP_MS = 60_000;
 
 export const loadCases = (file = CASES_FILE) => JSON.parse(readFileSync(file, "utf8")).cases;
+export const loadSpec = (file = SPEC_FILE) => JSON.parse(readFileSync(file, "utf8"));
+
+/** Follows a local `$ref` such as `#/components/schemas/Task`. */
+const deref = (spec, node) => (node?.$ref ? node.$ref.slice(2).split("/").reduce((at, key) => at?.[key], spec) : node);
+
+/**
+ * Where the OpenAPI document and the contract disagree, or an empty list. The document is a
+ * description of the API that clients can read; the cases are what every service is proved against. So
+ * each is held to the other: every case sent to a documented operation answers with a status the
+ * document lists, every listed response is exercised by a case, a method a documented path does not
+ * list is answered 405, and the schemas state the fields the services answer with and the statuses and
+ * title length of scripts/rules/task-rules.json.
+ */
+export function checkSpec(spec, cases, rules) {
+  const problems = [];
+  const templates = Object.keys(spec.paths ?? {});
+  const template = (path) => {
+    const segments = path.split("?")[0].split("/");
+    return templates.find((t) => {
+      const parts = t.split("/");
+      return parts.length === segments.length && parts.every((part, i) => (/^\{.+\}$/.test(part) ? segments[i] !== "" : part === segments[i]));
+    });
+  };
+  const exercised = new Set();
+  for (const c of cases) {
+    const path = template(c.path);
+    if (path === undefined) continue; // outside the API: answered 404, which the document says of any path
+    const method = c.method === "HEAD" ? "get" : c.method.toLowerCase();
+    const operation = spec.paths[path][method];
+    if (operation === undefined) {
+      if (c.status !== 405) problems.push(`case "${c.name}" sends ${c.method} to ${path}, which the document does not list, and expects ${c.status} rather than 405`);
+    } else if (!(String(c.status) in operation.responses)) {
+      problems.push(`case "${c.name}": ${c.method} ${path} answers ${c.status}, which the document does not list`);
+    } else {
+      exercised.add(`${method} ${path} ${c.status}`);
+    }
+  }
+  for (const path of templates) {
+    for (const [method, operation] of Object.entries(spec.paths[path])) {
+      for (const code of Object.keys(operation?.responses ?? {})) {
+        if (!exercised.has(`${method} ${path} ${code}`)) problems.push(`the document lists ${code} for ${method.toUpperCase()} ${path}, which no case exercises`);
+      }
+    }
+  }
+  const schemas = spec.components?.schemas ?? {};
+  const fields = Object.keys(schemas.Task?.properties ?? {}).sort().join(",");
+  if (fields !== TASK_FIELDS.join(",")) problems.push(`the Task schema has fields ${fields}, expected ${TASK_FIELDS.join(",")}`);
+  const statuses = deref(spec, schemas.Task?.properties?.status)?.enum;
+  if (JSON.stringify(statuses) !== JSON.stringify(rules.statuses)) {
+    problems.push(`the Status enum is ${JSON.stringify(statuses)}, expected ${JSON.stringify(rules.statuses)}`);
+  }
+  for (const [name, title] of [["Task", schemas.Task?.properties?.title], ["CreateTask", schemas.CreateTask?.properties?.title]]) {
+    if (title?.maxLength !== rules.maxTitleLength) problems.push(`the ${name} title maxLength is ${title?.maxLength}, expected ${rules.maxTitleLength}`);
+  }
+  return problems;
+}
 
 /** A body is a string sent as written, or an object whose `{ repeat, times }` values are expanded first. */
 export function encodeBody(body) {
@@ -74,7 +133,7 @@ export function judge(testCase, answer) {
   if (testCase.json && JSON.stringify(body) !== JSON.stringify(testCase.json)) problems.push(`body ${answer.text.slice(0, 80)}`);
   if (testCase.task) {
     const keys = Object.keys(body ?? {}).sort().join(",");
-    if (keys !== "createdAt,id,status,title,updatedAt") problems.push(`task fields ${keys}`);
+    if (keys !== TASK_FIELDS.join(",")) problems.push(`task fields ${keys}`);
     for (const [key, value] of Object.entries(testCase.task)) {
       if (body?.[key] !== value) problems.push(`${key} ${JSON.stringify(body?.[key])}, expected ${JSON.stringify(value)}`);
     }
