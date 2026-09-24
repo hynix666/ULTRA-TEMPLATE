@@ -15,3 +15,6 @@ Records are amended, not rewritten. When a decision changes, a new record supers
 | [0007](0007-mcp-server-as-an-adapter.md) | Expose the domain to assistants through an MCP adapter | Accepted |
 | [0008](0008-a-third-language-and-what-a-module-must-prove.md) | A third language, and what any module must prove | Accepted |
 | [0009](0009-where-agent-adapters-and-skills-live.md) | Skills stay real files in `.claude/skills/`; every agent adapter is governed | Accepted, amends 0006 |
+| [0010](0010-one-statement-of-the-task-rules.md) | State the task rules once, and hold every copy and the API contract to it | Accepted, amends 0005, 0007, 0008 |
+| [0011](0011-what-local-verify-guarantees.md) | Hold local verify to CI's toolchain, and name what only CI runs | Accepted, amends 0002 |
+| [0012](0012-lint-and-format-typescript-with-biome.md) | Lint and format the Node modules with Biome | Accepted |

@@ -4,7 +4,7 @@ Instructions for coding agents working in this repository. `CLAUDE.md` imports t
 
 ## Verify, then report exactly what ran
 
-- `node scripts/verify.mjs` runs every module's checks the way CI does. actionlint, zizmor, container image builds and the security scans run only in CI, so check the pull request's results as well. For a change confined to one module, `node scripts/verify.mjs <module>` runs the chassis and that module.
+- `node scripts/verify.mjs` runs every module's checks the way CI does, on the Node major `.node-version` pins; on another it fails before it proves anything. actionlint, zizmor, container image builds, the Windows chassis job, coverage reports and the security scans run only in CI, so check the pull request's results as well. For a change confined to one module, `node scripts/verify.mjs <module>` runs the chassis and that module. Two checks are reported as skipped by name where the machine cannot run them, and CI always does: golangci-lint, and Go's race detector without cgo and a C compiler.
 - Say which commands you ran and what they showed. Never imply verification you did not perform.
 - A check that could not run is a failure to report, not a pass.
 
@@ -13,10 +13,10 @@ Instructions for coding agents working in this repository. `CLAUDE.md` imports t
 Each of these fails `scripts/check-hygiene.mjs` or a module's own checks. Do not work around one; if it is wrong, change it deliberately and say why.
 
 - **One required check.** The ruleset `scripts/configure-github.mjs` creates requires only the `verify` job in `.github/workflows/verify.yml`. A new CI job must also be listed under `verify.needs`.
-- **Pinned supply chain.** Every third-party `uses:` is a 40-character commit SHA followed by `# vX.Y.Z`. Resolve the SHA from the release tag (`gh api repos/OWNER/REPO/commits/TAG --jq .sha`); never copy one from memory. Binaries downloaded in CI are checksum-verified, and container base images carry a digest. Every npm install passes `--ignore-scripts`, so no dependency runs code while it installs, and CI checks every installed package with `npm audit signatures`. See [ADR-0003](docs/adr/0003-pin-third-party-code.md).
+- **Pinned supply chain.** Every third-party `uses:` is a 40-character commit SHA followed by `# vX.Y.Z`. Resolve the SHA from the release tag (`gh api repos/OWNER/REPO/commits/TAG --jq .sha`); never copy one from memory. A download in a workflow that keeps a file is checksum-verified in the same step, nothing downloaded is piped into a shell, and every Dockerfile `FROM` carries a digest. Tools pinned by hand are listed with their latest releases each week by `pins.yml`, and moved only by hand ([toolchain updates](docs/toolchain-updates.md)). Every npm install passes `--ignore-scripts`, so no dependency runs code while it installs, and CI checks every installed package with `npm audit signatures`. See [ADR-0003](docs/adr/0003-pin-third-party-code.md).
 - **Least privilege in workflows.** Top-level `permissions: contents: read`, widened per job only where needed. Every job has `timeout-minutes`. A step that starts a detached container removes it with `trap 'docker rm --force NAME' EXIT`. Event values such as branch names reach shell scripts through `env:`, never as `${{ }}` inside `run:`. The `zizmor` job in `verify.yml` audits every workflow for these and other security mistakes. Fix what it reports; an audit is switched off only in `.github/zizmor.yml`, with the reason beside it.
 - **Repository shape.** No `.env` files, no dependency directories, no file over 4 MB, no invalid JSON, nothing both tracked and ignored. No text file holds a raw control character, an invisible or text-reordering character (a reviewer would not see what an agent reads), or an absolute path into a home directory.
-- **Independent modules.** Every module has its own manifest, lockfile, CI job and `verify` script, and `check-hygiene` fails when a module that is present lacks one of them. Never import across module directories ([ADR-0004](docs/adr/0004-independent-modules.md)). The root `package.json` only names the scripts in `scripts/`: it has no dependencies and so no lockfile, and a dependency belongs in the module that needs it.
+- **Independent modules.** Every module has its own manifest, lockfile, `verify` script, a job in `verify.yml` named after its id, and a Dependabot entry for its directory, and `check-hygiene` fails when a module that is present lacks one of them. Never import across module directories ([ADR-0004](docs/adr/0004-independent-modules.md)). The root `package.json` only names the scripts in `scripts/`: it has no dependencies and so no lockfile, and a dependency belongs in the module that needs it.
 - **One set of instructions.** This file is the only one. `CLAUDE.md`, `GEMINI.md` and `.github/copilot-instructions.md` point here and carry no rules of their own; files under `.github/prompts/` and `.github/agents/` wrap a task and defer to this file; no `AGENT.md` and no case variants of these names. Every document under `docs/` is linked from the index beside it, and every relative link resolves. `scripts/check-docs.mjs` enforces all of it ([ADR-0006](docs/adr/0006-one-set-of-agent-instructions.md), [ADR-0009](docs/adr/0009-where-agent-adapters-and-skills-live.md)).
 
 ## Architecture
@@ -66,8 +66,20 @@ The LikeC4 model in `architecture/model/` describes the system. Update it in the
 <!-- ultra:end architecture -->
 
 <!-- ultra:begin go-service|ts-service|py-service -->
-Every task service in this repository answers the same routes with the same status codes and reads the same configuration variables. `scripts/check-contract.mjs` holds each one to the cases in `scripts/contract/tasks-api.json`; change the contract there first, then every service, never one service alone.
+Every task service in this repository answers the same routes with the same status codes, reads the same configuration variables, answers every request with an `X-Request-Id` and logs it as the same one JSON line. `scripts/check-contract.mjs` holds each one to the cases in `scripts/contract/tasks-api.json`, and holds `scripts/contract/openapi.json` to those cases; change the contract there first, then every service, never one service alone.
 <!-- ultra:end go-service|ts-service|py-service -->
+<!-- ultra:begin go-service|ts-service|py-service|mcp-server|web|ts-library -->
+The task rules (the statuses, the legal moves, the longest title) are stated once, in `scripts/rules/task-rules.json`. Change a rule there first, then in every module that repeats it ([ADR-0010](docs/adr/0010-one-statement-of-the-task-rules.md)).
+<!-- ultra:end go-service|ts-service|py-service|mcp-server|web|ts-library -->
+<!-- ultra:begin go-service|ts-service|py-service -->
+The contract's move cases state every pair of statuses as that file does, so a task service is held to the rules over HTTP.
+<!-- ultra:end go-service|ts-service|py-service -->
+<!-- ultra:begin mcp-server|web|ts-library -->
+A module that repeats the rules without serving them prints its own table with `npm run rules`, and `scripts/check-rules.mjs` compares it with the file.
+<!-- ultra:end mcp-server|web|ts-library -->
+<!-- ultra:begin ts-service|mcp-server|web|ts-library|architecture -->
+Every Node module lints and formats with Biome: `npm run lint` checks both, and `npx biome format --write .` in the module fixes the layout. A rule is switched off only in the module's `biome.jsonc`, with the reason beside it ([ADR-0012](docs/adr/0012-lint-and-format-typescript-with-biome.md)).
+<!-- ultra:end ts-service|mcp-server|web|ts-library|architecture -->
 
 ## Skills
 

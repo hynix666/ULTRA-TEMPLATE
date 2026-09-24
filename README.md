@@ -10,14 +10,16 @@
 It is for anyone starting a service, a web app, a library or an MCP server who wants those checks in place from the first commit, not added after something breaks.
 
 - **One gate.** `node scripts/verify.mjs` runs every module's checks as CI does, and CI reports a single required check, `verify`.
-- **A pinned supply chain the build enforces.** Actions pinned to commit SHAs, checksum-verified binaries, digest-pinned images, and npm installs that run no dependency's install scripts, with every package's registry signature verified.
+- **A pinned supply chain the build enforces.** Actions pinned to commit SHAs, checksum-verified downloads, digest-pinned images, and npm installs that run no dependency's install scripts, with every package's registry signature verified. A weekly report names the hand-pinned tools that have a newer release, and the published MCP image carries a build provenance attestation.
 - **Repository hygiene checks.** A tracked `.env`, a vendored `node_modules`, a truncated `.gitignore`, a file over 4 MB, a module missing its lockfile, a CI job left out of the gate, an invisible character hiding text from reviewers, or a path into someone's home directory each fail the build.
-- **Clean Architecture services whose layer rules are tests**, in Go, TypeScript and Python — the same structure proved in three toolchains, and the same API proved by one contract every service is started and checked against.
+- **Clean Architecture services whose layer rules are tests**, in Go, TypeScript and Python — the same structure proved in three toolchains, and the same API proved by one contract every service is started and checked against: every move between statuses, a request id and one log line per request, and an OpenAPI description held to the same cases.
+- **One statement of the rules.** The statuses and legal moves are written once, and every module that repeats them, the MCP server, the web app and the library included, is checked against that statement.
 - **A feature-sliced web app and a publishable library**, each with its import or packaging rules checked.
 - **An MCP server for agents**, built on the official SDK and tested through a real client, not a mock.
 - **Architecture as code.** A LikeC4 model with rules checked in CI.
 - **One set of instructions for agents.** `AGENTS.md` is the only copy; `CLAUDE.md`, `GEMINI.md` and Copilot's file point at it, and a check fails when one starts saying something else.
-- **Selectable features, tested.** CI generates a project from every preset and runs that project's own checks.
+- **Selectable features, tested.** CI generates a project from every preset and runs that project's own checks, and a project can add or remove a feature later with the same three-way merge that brings in template releases.
+- **The same checks everywhere.** Node modules lint and format with Biome as Go and Python modules do with their own tools, local runs refuse a Node other than CI's, the chassis runs on Windows in CI, and every module's coverage is reported without being gated.
 
 ## Start a project
 
