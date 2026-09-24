@@ -1,0 +1,6 @@
+{
+  "id": "architecture",
+  "toolchain": "node",
+  "checks": [{ "name": "npm run verify", "run": ["npm", "run", "verify"] }],
+  "coverage": { "run": [["npm", "run", "--silent", "coverage"]], "report": "coverage/lcov.info" }
+}

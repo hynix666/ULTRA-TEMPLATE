@@ -1,0 +1,8 @@
+{
+  "id": "mcp-server",
+  "toolchain": "node",
+  "checks": [{ "name": "npm run verify", "run": ["npm", "run", "verify"] }],
+  "coverage": { "run": [["npm", "run", "--silent", "coverage"]], "report": "coverage/lcov.info" },
+  "facts": { "run": ["npm", "run", "--silent", "rules"], "keys": ["statuses", "transitions", "maxTitleLength"] },
+  "image": "mcp"
+}

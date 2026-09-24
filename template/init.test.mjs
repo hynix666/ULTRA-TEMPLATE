@@ -4,7 +4,7 @@ import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync,
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
-import { MODULES } from "../scripts/modules.mjs";
+import { presentModules } from "../scripts/modules.mjs";
 import {
   applyMarkers, DESCRIPTION_ANCHOR, describeProject, InitError, loadManifest, MARKER_RE, originDefaults, originIdentity, plan, recordDescription,
   removedPaths, replaceIdentity, resolveSelection, ROOT, toProjectName, validateDescription, validateIdentity, validateManifest,
@@ -187,9 +187,11 @@ test("the 1.x public contract only grows: no feature or preset is removed or ren
   }
 });
 
-test("every module directory scripts/modules.mjs knows is owned by exactly one feature", () => {
+test("every module's directory is owned by exactly one feature, the one its module.json names", () => {
   const manifest = loadManifest();
-  for (const module of MODULES) {
+  const modules = presentModules();
+  assert.ok(modules.length > 0, "no module.json found: discovery is broken");
+  for (const module of modules) {
     const owners = Object.entries(manifest.features).filter(([, f]) => f.paths.includes(module.dir)).map(([id]) => id);
     assert.deepEqual(owners, [module.id], module.dir);
   }

@@ -25,11 +25,12 @@
  *  11. No tracked source or config file contains an invisible or text-reordering character. A human
  *      reviewer sees nothing where an agent reads a hidden instruction, or code runs other than shown.
  *  12. No tracked source or config file holds an absolute path into someone's home directory.
- *  13. Every module present tracks the manifest and lockfile its toolchain installs from, a Node
- *      module's manifest has the `verify` script both verify.mjs and its CI job run, verify.yml has a
- *      job named after the module, and dependabot.yml an entry for its directory. Deleting the job
- *      or the entry leaves everything green while CI stops checking the module and its dependencies
- *      stop moving.
+ *  13. Every module's module.json is valid, and the module tracks the manifest and lockfile its
+ *      toolchain installs from, has every `npm run` script its module.json names, a verify.yml job
+ *      named after it, and a dependabot.yml entry for its directory. Deleting the job or the entry
+ *      leaves everything green while CI stops checking the module and its dependencies stop moving.
+ *      A toolchain manifest (package.json, go.mod, pyproject.toml) below the root with no module.json
+ *      beside it or above it fails too: nothing would install or verify it.
  *  14. Every Dockerfile `FROM` names its base image by digest. A tag can be repointed at a different
  *      image with no diff here, the exposure ADR-0003 pins actions against.
  *  15. A download in a workflow or local action that keeps a file is verified against a checksum in
@@ -44,7 +45,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { MODULES } from "./modules.mjs";
+import { MANIFEST, TOOLCHAINS, validateManifest } from "./modules.mjs";
 
 export const REQUIRED_IGNORES = ["node_modules/", "dist/", "coverage/", ".env", ".env.*"];
 /** Below this the file was truncated, not edited. */
@@ -87,17 +88,10 @@ export function checkInstalls(path, text) {
 }
 
 /**
- * What each toolchain installs from, and must therefore commit. Go has no entry: a module with
- * dependencies commits go.sum and one without does not, and `go mod tidy -diff` in verify holds both
- * to their go.mod.
- */
-const MODULE_FILES = { node: ["package.json", "package-lock.json"], python: ["pyproject.toml", "uv.lock"], go: ["go.mod"] };
-
-/**
- * Rule 13. A module whose lockfile is missing still installs — setup.mjs falls back to `npm install`,
- * which is how a new module's lockfile is first written — but from then on every machine and every CI
- * run resolves its own dependency tree, and nothing says so. This rule is what makes that fallback
- * safe to keep: the module cannot be committed without the lockfile the fallback produced.
+ * Rule 13. A module whose lockfile is missing still installs (setup.mjs falls back to its toolchain's
+ * unlocked install, which is how a new module's lockfile is first written), but from then on every
+ * machine and every CI run resolves its own dependency tree, and nothing says so. This rule is what
+ * makes that fallback safe to keep: the module cannot be committed without the lockfile it produced.
  */
 export function checkModules(tracked, read) {
   const failures = [];
@@ -105,32 +99,65 @@ export function checkModules(tracked, read) {
   // report the wrong thing.
   const jobs = tracked.includes(GATE) ? jobIds(read(GATE)) : null;
   const updated = tracked.includes(DEPENDABOT) ? dependabotDirectories(read(DEPENDABOT)) : null;
-  for (const module of MODULES) {
-    if (!tracked.some((path) => path.startsWith(`${module.dir}/`))) continue;
-    for (const file of MODULE_FILES[module.toolchain]) {
-      if (!tracked.includes(`${module.dir}/${file}`)) {
-        failures.push(`\`${module.dir}\` is present but does not track \`${file}\`, so it installs a dependency tree nothing pins.`);
-      }
-    }
-    if (jobs !== null && !jobs.includes(module.id)) {
-      failures.push(`\`${module.dir}\` is present but \`verify.yml\` has no \`${module.id}\` job, so CI never runs its checks.`);
-    }
-    if (updated !== null && !updated.includes(`/${module.dir}`)) {
-      failures.push(`\`${DEPENDABOT}\` has no entry for \`/${module.dir}\`, so its dependencies are never proposed for update.`);
-    }
-    if (module.toolchain !== "node" || !tracked.includes(`${module.dir}/package.json`)) continue;
-    let manifest;
+  const manifests = tracked.filter((path) => path.endsWith(`/${MANIFEST}`));
+  const dirs = manifests.map((path) => path.slice(0, -MANIFEST.length - 1));
+  const ids = new Map();
+  for (const [i, path] of manifests.entries()) {
+    const dir = dirs[i];
+    let module;
     // Rule 4 reports a manifest that does not parse; this rule says nothing more about it.
     try {
-      manifest = JSON.parse(read(`${module.dir}/package.json`));
+      module = JSON.parse(read(path));
     } catch {
       continue;
     }
-    if (manifest.scripts?.verify === undefined) {
-      failures.push(`\`${module.dir}/package.json\` has no \`verify\` script, which is the one entry point verify.mjs and its CI job run.`);
+    const problems = validateManifest(module, path);
+    if (problems.length > 0) {
+      failures.push(...problems.map((problem) => `${problem}.`));
+      continue;
+    }
+    if (ids.has(module.id)) failures.push(`\`${path}\` and \`${ids.get(module.id)}\` both name the module \`${module.id}\`.`);
+    ids.set(module.id, path);
+    const toolchain = TOOLCHAINS[module.toolchain];
+    for (const file of [toolchain.manifest, toolchain.lockfile].filter(Boolean)) {
+      if (!tracked.includes(`${dir}/${file}`)) {
+        failures.push(`\`${dir}\` is present but does not track \`${file}\`, so it installs a dependency tree nothing pins.`);
+      }
+    }
+    if (jobs !== null && !jobs.includes(module.id)) {
+      failures.push(`\`${dir}\` is present but \`verify.yml\` has no \`${module.id}\` job, so CI never runs its checks.`);
+    }
+    if (updated !== null && !updated.includes(`/${dir}`)) {
+      failures.push(`\`${DEPENDABOT}\` has no entry for \`/${dir}\`, so its dependencies are never proposed for update.`);
+    }
+    if (module.toolchain !== "node" || !tracked.includes(`${dir}/package.json`)) continue;
+    let scripts;
+    try {
+      scripts = JSON.parse(read(`${dir}/package.json`)).scripts ?? {};
+    } catch {
+      continue;
+    }
+    for (const script of npmScripts(module)) {
+      if (!(script in scripts)) failures.push(`\`${path}\` runs \`npm run ${script}\`, which \`${dir}/package.json\` does not define.`);
+    }
+  }
+  // A module nothing declares is a module nothing installs or verifies, while it looks like part of the build.
+  const manifestNames = new Set(Object.values(TOOLCHAINS).map((t) => t.manifest));
+  for (const path of tracked) {
+    const at = path.lastIndexOf("/");
+    if (at === -1 || !manifestNames.has(path.slice(at + 1))) continue;
+    const dir = path.slice(0, at);
+    if (!dirs.some((moduleDir) => dir === moduleDir || dir.startsWith(`${moduleDir}/`))) {
+      failures.push(`\`${path}\` looks like a module, but no \`${MANIFEST}\` declares it, so nothing installs or verifies it.`);
     }
   }
   return failures;
+}
+
+/** The npm scripts a module's manifest runs, from its checks, coverage and facts commands. */
+function npmScripts(module) {
+  const commands = [...module.checks.flatMap((c) => [c.run, c.otherwise?.run]), ...(module.coverage?.run ?? []), module.facts?.run].filter(Boolean);
+  return commands.filter((c) => c[0] === "npm" && c[1] === "run").map((c) => c.slice(2).find((arg) => !arg.startsWith("-")));
 }
 
 const GATE = ".github/workflows/verify.yml";

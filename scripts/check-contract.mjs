@@ -29,7 +29,6 @@ export const CASES_FILE = join(ROOT, "scripts", "contract", "tasks-api.json");
 export const SPEC_FILE = join(ROOT, "scripts", "contract", "openapi.json");
 /** The fields of a task, as every service answers with them and the OpenAPI document states them. */
 export const TASK_FIELDS = ["createdAt", "id", "status", "title", "updatedAt"];
-export const TASK_SERVICES = ["go-service", "ts-service", "py-service"];
 const STARTUP_MS = 60_000;
 const LOG_WAIT_MS = 3_000;
 
@@ -270,15 +269,27 @@ const freePort = () =>
     });
   });
 
-/** How each task service is started. Go is built first, so stopping it stops the server itself. */
-function command(id, dir, scratch) {
-  if (id === "go-service") {
-    const binary = join(scratch, process.platform === "win32" ? "api.exe" : "api");
-    const build = spawnSync("go", ["build", "-o", binary, "./cmd/api"], { cwd: dir, stdio: "inherit" });
-    return build.status === 0 ? [binary, []] : null;
+/**
+ * The placeholders a module's `taskApi` commands may use: a scratch directory for a build, and the
+ * platform's executable suffix. Anything else in braces is a mistake in the manifest, and is refused.
+ */
+export function expandCommand(command, vars) {
+  return command.map((part) =>
+    part.replace(/\{(\w+)\}/g, (_, name) => {
+      if (!(name in vars)) throw new Error(`unknown placeholder {${name}} in ${command.join(" ")}`);
+      return vars[name];
+    }),
+  );
+}
+
+/** Builds the service when its manifest says how, and returns the command that starts it, or null. */
+function startCommand(module, dir, scratch) {
+  const vars = { scratch, exe: process.platform === "win32" ? ".exe" : "" };
+  if (module.taskApi.build) {
+    const [command, ...args] = expandCommand(module.taskApi.build, vars);
+    if (spawnSync(command, args, { cwd: dir, stdio: "inherit" }).status !== 0) return null;
   }
-  if (id === "ts-service") return ["node", ["src/main.ts"]];
-  return ["uv", ["run", "--frozen", "--directory", "src", "python", "-m", "api_py.main"]];
+  return expandCommand(module.taskApi.run, vars);
 }
 
 function stop(child) {
@@ -306,11 +317,11 @@ async function checkService(module, cases) {
   const scratch = mkdtempSync(join(tmpdir(), "contract-"));
   const dir = join(ROOT, module.dir);
   try {
-    const cmd = command(module.id, dir, scratch);
+    const cmd = startCommand(module, dir, scratch);
     if (cmd === null) return { module, fatal: "did not build" };
     const port = await freePort();
     const base = `http://127.0.0.1:${port}`;
-    const child = spawn(cmd[0], cmd[1], {
+    const child = spawn(cmd[0], cmd.slice(1), {
       cwd: dir,
       env: { ...process.env, PORT: String(port) },
       stdio: ["ignore", "pipe", "pipe"],
@@ -345,7 +356,7 @@ async function checkService(module, cases) {
 
 async function main() {
   const requested = process.argv.slice(2);
-  const present = presentModules().filter((m) => TASK_SERVICES.includes(m.id));
+  const present = presentModules().filter((m) => m.taskApi);
   const unknown = requested.filter((id) => !present.some((m) => m.id === id));
   if (unknown.length > 0) {
     console.error(`check-contract: ${unknown.join(", ")} is not a task service present here. Present: ${present.map((m) => m.id).join(", ") || "none"}.`);

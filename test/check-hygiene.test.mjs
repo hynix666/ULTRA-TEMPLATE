@@ -171,35 +171,66 @@ test("an absolute path into a home directory fails; container paths, placeholder
   assert.doesNotMatch(found, /fine\.md|devcontainer\.json|compose\.yml/);
 });
 
-test("a module present without its lockfile or its verify script fails; a complete one passes", () => {
-  const manifest = (scripts) => JSON.stringify({ scripts });
-  const read = (path) => ({
-    "services/api-ts/package.json": manifest({ verify: "npm test" }),
-    "apps/web/package.json": manifest({ test: "vitest run" }),
-  })[path];
+// A node module's manifest and package.json, as module.json and npm would write them.
+const nodeModule = (id, scripts = { verify: "npm test" }, extra = {}) => ({
+  manifest: JSON.stringify({ id, toolchain: "node", checks: [{ name: "npm run verify", run: ["npm", "run", "verify"] }], ...extra }),
+  pkg: JSON.stringify({ scripts }),
+});
 
-  const complete = ["services/api-ts/package.json", "services/api-ts/package-lock.json", "services/api-ts/src/main.ts"];
+test("a module missing its lockfile, or a script its manifest runs, fails; a complete one passes", () => {
+  const api = nodeModule("ts-service");
+  const web = nodeModule("web", { test: "vitest run" });
+  const py = JSON.stringify({ id: "py-service", toolchain: "python", checks: [{ name: "pytest", run: ["uv", "run", "pytest"] }] });
+  const files = {
+    "services/api-ts/module.json": api.manifest,
+    "services/api-ts/package.json": api.pkg,
+    "apps/web/module.json": web.manifest,
+    "apps/web/package.json": web.pkg,
+    "services/api-py/module.json": py,
+  };
+  const read = (path) => files[path];
+
+  const complete = ["services/api-ts/module.json", "services/api-ts/package.json", "services/api-ts/package-lock.json", "services/api-ts/src/main.ts"];
   assert.deepEqual(checkModules(complete, read), []);
   assert.match(checkModules(complete.filter((p) => !p.endsWith("lock.json")), read).join(), /api-ts` is present but does not track `package-lock\.json`/);
   assert.match(
-    checkModules(["apps/web/package.json", "apps/web/package-lock.json"], read).join(),
-    /apps\/web\/package\.json` has no `verify` script/,
+    checkModules(["apps/web/module.json", "apps/web/package.json", "apps/web/package-lock.json"], read).join(),
+    /apps\/web\/module\.json` runs `npm run verify`, which `apps\/web\/package\.json` does not define/,
   );
-  assert.match(
-    checkModules(["services/api-py/pyproject.toml", "services/api-py/src/main.py"], read).join(),
-    /api-py` is present but does not track `uv\.lock`/,
-  );
-  // A module that is not there is not a missing lockfile.
+  assert.match(checkModules(["services/api-py/module.json", "services/api-py/pyproject.toml"], read).join(), /api-py` is present but does not track `uv\.lock`/);
+  // A directory with no module in it is not a missing lockfile.
   assert.deepEqual(checkModules(["README.md"], read), []);
 });
 
-test("a module present without its CI job or its Dependabot entry fails; wiring read only when tracked", () => {
+test("a malformed manifest, a repeated module name, and a module no manifest declares all fail", () => {
   const files = {
-    "services/api-ts/package.json": JSON.stringify({ scripts: { verify: "npm test" } }),
+    "a/module.json": JSON.stringify({ id: "Bad Id", toolchain: "cobol", checks: [], colour: "red" }),
+    "b/module.json": nodeModule("same").manifest,
+    "b/package.json": nodeModule("same").pkg,
+    "c/module.json": nodeModule("same").manifest,
+    "c/package.json": nodeModule("same").pkg,
+  };
+  const read = (path) => files[path];
+  const found = checkModules(Object.keys(files).concat(["b/package-lock.json", "c/package-lock.json", "tools/gen/go.mod", "package.json"]), read).join("\n");
+  assert.match(found, /a\/module\.json: unknown key `colour`/);
+  assert.match(found, /a\/module\.json: `id` must be lowercase/);
+  assert.match(found, /a\/module\.json: `toolchain` must be one of/);
+  assert.match(found, /a\/module\.json: `checks` must list at least one check/);
+  assert.match(found, /`c\/module\.json` and `b\/module\.json` both name the module `same`/);
+  assert.match(found, /`tools\/gen\/go\.mod` looks like a module, but no `module\.json` declares it/);
+  // The repository's own package.json names scripts; it is no module.
+  assert.doesNotMatch(found, /`package\.json` looks like a module/);
+});
+
+test("a module present without its CI job or its Dependabot entry fails; wiring read only when tracked", () => {
+  const api = nodeModule("ts-service");
+  const files = {
+    "services/api-ts/module.json": api.manifest,
+    "services/api-ts/package.json": api.pkg,
     ".github/workflows/verify.yml": "jobs:\n  chassis:\n    timeout-minutes: 5\n  ts-service:\n    timeout-minutes: 5\n",
     ".github/dependabot.yml": "updates:\n  - package-ecosystem: npm\n    directory: /services/api-ts\n",
   };
-  const module = ["services/api-ts/package.json", "services/api-ts/package-lock.json"];
+  const module = ["services/api-ts/module.json", "services/api-ts/package.json", "services/api-ts/package-lock.json"];
   const wiring = [".github/workflows/verify.yml", ".github/dependabot.yml"];
   const read = (overrides = {}) => (path) => ({ ...files, ...overrides })[path];
 

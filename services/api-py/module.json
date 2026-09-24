@@ -1,0 +1,25 @@
+{
+  "id": "py-service",
+  "toolchain": "python",
+  "checks": [
+    {
+      "name": "uv.lock up to date",
+      "run": ["uv", "lock", "--check"],
+      "why": "Checked like go mod tidy -diff and never rewritten: a plain `uv run` re-locks a stale uv.lock in place, so verify would pass on the drift CI must refuse."
+    },
+    { "name": "ruff check", "run": ["uv", "run", "--frozen", "ruff", "check", "."] },
+    { "name": "ruff format", "run": ["uv", "run", "--frozen", "ruff", "format", "--check", "."] },
+    { "name": "mypy", "run": ["uv", "run", "--frozen", "mypy"] },
+    { "name": "pytest", "run": ["uv", "run", "--frozen", "pytest"] },
+    { "name": "check-boundaries", "run": ["uv", "run", "--frozen", "python", "scripts/check_boundaries.py"] }
+  ],
+  "coverage": {
+    "run": [
+      ["uv", "run", "--frozen", "coverage", "run", "-m", "pytest"],
+      ["uv", "run", "--frozen", "coverage", "lcov", "-o", "coverage/lcov.info"]
+    ],
+    "report": "coverage/lcov.info"
+  },
+  "taskApi": { "run": ["uv", "run", "--frozen", "--directory", "src", "python", "-m", "api_py.main"] },
+  "image": "http"
+}
