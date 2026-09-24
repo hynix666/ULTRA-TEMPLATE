@@ -6,7 +6,14 @@ export interface Config {
 export class ConfigError extends Error {}
 
 const UNIT_MS: Readonly<Record<string, number>> = {
-  h: 3_600_000, m: 60_000, s: 1000, ms: 1, us: 0.001, "µs": 0.001, "μs": 0.001, ns: 0.000_001,
+  h: 3_600_000,
+  m: 60_000,
+  s: 1000,
+  ms: 1,
+  us: 0.001,
+  "µs": 0.001,
+  "μs": 0.001,
+  ns: 0.000_001,
 };
 
 // The grammar of Go's time.ParseDuration: an optional sign, then one or more numbers ("1", "1.", ".5",

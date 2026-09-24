@@ -56,5 +56,8 @@ test("the memory repository keeps insertion order when a task is replaced", asyn
   await store.save({ ...base, id: "a", title: "first" });
   await store.save({ ...base, id: "b", title: "second" });
   await store.save({ ...base, id: "a", title: "first, renamed" });
-  assert.deepEqual((await store.list()).map((t) => t.title), ["first, renamed", "second"]);
+  assert.deepEqual(
+    (await store.list()).map((t) => t.title),
+    ["first, renamed", "second"],
+  );
 });

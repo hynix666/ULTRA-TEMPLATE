@@ -22,7 +22,10 @@ test("the application may not reach adapters, the SDK or the composition root", 
 });
 
 test("adapters may use built-ins and packages, but not the composition root", () => {
-  assert.deepEqual(checkFile("src/adapters/mcp.ts", 'import { McpServer } from "@modelcontextprotocol/server";\nimport x from "node:util";'), []);
+  assert.deepEqual(
+    checkFile("src/adapters/mcp.ts", 'import { McpServer } from "@modelcontextprotocol/server";\nimport x from "node:util";'),
+    [],
+  );
   assert.equal(checkFile("src/adapters/mcp.ts", 'export { loadConfig } from "../config.ts";').length, 1);
 });
 

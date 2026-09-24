@@ -6,12 +6,13 @@ import { randomUUID } from "node:crypto";
 import { createServer } from "node:http";
 import { createHandler, type Log } from "./adapters/http.ts";
 import { MemoryTaskRepository } from "./adapters/memory-task-repository.ts";
+import { withRequestLog } from "./adapters/request-log.ts";
 import { TaskService } from "./application/task-service.ts";
-import { ConfigError, loadConfig } from "./config.ts";
+import { type Config, ConfigError, loadConfig } from "./config.ts";
 
 const log: Log = (entry) => console.log(JSON.stringify({ time: new Date().toISOString(), ...entry }));
 
-let config;
+let config: Config;
 try {
   config = loadConfig(process.env);
 } catch (err) {
@@ -26,7 +27,8 @@ const service = new TaskService({
   ids: { next: () => randomUUID() },
 });
 
-const server = createServer(createHandler(service, log));
+const handler = withRequestLog(createHandler(service, log), log, { monotonic: () => performance.now(), newId: () => randomUUID() });
+const server = createServer(handler);
 // Without these a client that sends headers or a body slowly holds a connection open indefinitely.
 server.headersTimeout = 5_000;
 server.requestTimeout = 15_000;

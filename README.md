@@ -10,14 +10,16 @@
 It is for anyone starting a service, a web app, a library or an MCP server who wants those checks in place from the first commit, not added after something breaks.
 
 - **One gate.** `node scripts/verify.mjs` runs every module's checks as CI does, and CI reports a single required check, `verify`.
-- **A pinned supply chain the build enforces.** Actions pinned to commit SHAs, checksum-verified binaries, digest-pinned images, and npm installs that run no dependency's install scripts, with every package's registry signature verified.
+- **A pinned supply chain the build enforces.** Actions pinned to commit SHAs, checksum-verified downloads, digest-pinned images, and npm installs that run no dependency's install scripts, with every package's registry signature verified. A weekly report names the hand-pinned tools that have a newer release, and the published MCP image carries a build provenance attestation.
 - **Repository hygiene checks.** A tracked `.env`, a vendored `node_modules`, a truncated `.gitignore`, a file over 4 MB, a module missing its lockfile, a CI job left out of the gate, an invisible character hiding text from reviewers, or a path into someone's home directory each fail the build.
-- **Clean Architecture services whose layer rules are tests**, in Go, TypeScript and Python — the same structure proved in three toolchains, and the same API proved by one contract every service is started and checked against.
+- **Clean Architecture services whose layer rules are tests**, in Go, TypeScript and Python — the same structure proved in three toolchains, and the same API proved by one contract every service is started and checked against: every move between statuses, a request id and one log line per request, and an OpenAPI description held to the same cases.
+- **One statement of the rules.** The statuses and legal moves are written once, and every module that repeats them, the MCP server, the web app and the library included, is checked against that statement.
 - **A feature-sliced web app and a publishable library**, each with its import or packaging rules checked.
 - **An MCP server for agents**, built on the official SDK and tested through a real client, not a mock.
 - **Architecture as code.** A LikeC4 model with rules checked in CI.
 - **One set of instructions for agents.** `AGENTS.md` is the only copy; `CLAUDE.md`, `GEMINI.md` and Copilot's file point at it, and a check fails when one starts saying something else.
-- **Selectable features, tested.** CI generates a project from every preset and runs that project's own checks.
+- **Selectable features, tested.** CI generates a project from every preset and runs that project's own checks, and a project can add or remove a feature later with the same three-way merge that brings in template releases.
+- **The same checks everywhere.** Node modules lint and format with Biome as Go and Python modules do with their own tools, local runs refuse a Node other than CI's, the chassis runs on Windows in CI, and every module's coverage is reported without being gated.
 
 ## Start a project
 
@@ -114,16 +116,19 @@ Each toolchain version is pinned once, in the file named beside it above, so the
    node scripts/verify.mjs <module>    # the chassis plus the named modules only
    ```
 
-   It runs each module's own checks and tests, and the API contract against every task service present. A check it cannot run is reported as skipped, never as passed. A few checks run only in CI, because they need a container engine, a network service or a CI-only tool: actionlint and zizmor on the workflows, `npm audit signatures`, building and starting each container image, and the report-only scans in `security.yml`.
+   It runs each module's own checks and tests, and the API contract against every task service present, on the Node major `.node-version` names, and fails on any other. A check it cannot run fails, and the two it may skip, golangci-lint and Go's race detector where there is no C compiler, are reported as skipped by name, never as passed. A few checks run only in CI, because they need a container engine, a network service or a CI-only tool: actionlint and zizmor on the workflows, `npm audit signatures`, building and starting each container image, and the report-only scans in `security.yml`.
 
 3. Start what you are working on. Each module's entry under *What's here* names the command that starts it.
 
 ## What's here
 
-- `scripts/` — `setup.mjs` installs every module, `verify.mjs` runs every module's checks, `check-hygiene.mjs` guards the repository's shape, `check-docs.mjs` its documentation, and `configure-github.mjs` applies the repository settings (squash merging, the required `verify` check, security features).
+- `scripts/` — `setup.mjs` installs every module, `verify.mjs` runs every module's checks, `check-hygiene.mjs` guards the repository's shape, `check-docs.mjs` its documentation, and `configure-github.mjs` applies the repository settings (squash merging, the required `verify` check, security features). In CI, `coverage-summary.mjs` reports each module's coverage and `check-pins.mjs` the hand-pinned tools with a newer release.
 <!-- ultra:begin go-service|ts-service|py-service -->
-- `scripts/check-contract.mjs` — holds every task service to the one API contract, whose cases are in `scripts/contract/`.
+- `scripts/check-contract.mjs` — holds every task service to the one API contract, whose cases are in `scripts/contract/` beside the OpenAPI document it holds to them.
 <!-- ultra:end go-service|ts-service|py-service -->
+<!-- ultra:begin mcp-server|web|ts-library -->
+- `scripts/check-rules.mjs` — holds every module that repeats the task rules without serving them to `scripts/rules/task-rules.json`.
+<!-- ultra:end mcp-server|web|ts-library -->
 <!-- ultra:begin go-service -->
 - `services/api-go/` — Go task API in Clean Architecture layers. `go run ./cmd/api` there serves it on port 8080. [README](services/api-go/README.md)
 <!-- ultra:end go-service -->
@@ -155,7 +160,7 @@ Each toolchain version is pinned once, in the file named beside it above, so the
 
 ## Continuous integration
 
-- **`verify.yml`** — on every pull request, every push to `main`, and in a merge queue: repository hygiene, chassis tests, actionlint, a security audit of the workflows with [zizmor](https://docs.zizmor.sh), and one job per module — each service job also runs the API contract and starts the service's container image to prove it answers — all feeding the aggregate **`verify`** job, which is the only required check ([ADR-0002](docs/adr/0002-one-required-check.md)).
+- **`verify.yml`** — on every pull request, every push to `main`, and in a merge queue: repository hygiene, chassis tests on Linux and on Windows, actionlint, a security audit of the workflows with [zizmor](https://docs.zizmor.sh), and one job per module — each service job also runs the API contract and starts the service's container image to prove it answers, and each module job writes its test coverage to the job summary, reported and never gated — all feeding the aggregate **`verify`** job, which is the only required check ([ADR-0002](docs/adr/0002-one-required-check.md), [ADR-0011](docs/adr/0011-what-local-verify-guarantees.md)).
 - **`pr-title.yml`** — pull request titles follow Conventional Commits.
 - **`copilot-setup-steps.yml`** — the environment GitHub's Copilot coding agent prepares before it works here: every toolchain the selected features need, then `node scripts/setup.mjs`. It runs on its own only when it changes.
 - **`security.yml`** — report-only scans that fail only when a scan could not run: gitleaks over new commits and weekly over history, `npm audit` for every npm lockfile, and a Trivy scan of every container image the repository builds, for fixable high and critical vulnerabilities in its operating-system and language packages.
@@ -165,10 +170,11 @@ Each toolchain version is pinned once, in the file named beside it above, so the
 <!-- ultra:begin py-service -->
 - **`security.yml`, Python** — pip-audit over the Python service's lockfile.
 <!-- ultra:end py-service -->
+- **`pins.yml`** — weekly, report-only: which tools pinned by hand in the workflows have a newer release. It never moves a pin; [docs/toolchain-updates.md](docs/toolchain-updates.md) says how.
 - **`codeql.yml`** — CodeQL analysis; enable it by setting the repository variable `CODEQL_ENABLED=true` (needs a public repository or GitHub Advanced Security).
 - **`scorecard.yml`** — [OpenSSF Scorecard](https://scorecard.dev): an outside measurement of the practices this repository claims, published and uploaded to code scanning; enable it with `SCORECARD_ENABLED=true` on a public repository. Some checks measure the project rather than the workflows, and a new or single-maintainer repository scores low on them: Code-Review and Branch-Protection while pull requests merge without a second person's review, Maintained for its first 90 days, SAST until CodeQL has run on recent pull requests, and CII-Best-Practices until the project registers for the badge.
 <!-- ultra:begin mcp-server -->
-- **`mcp-publish.yml`** — after a release, pushes the MCP server's image, built for amd64 and arm64, to GitHub Container Registry and its `server.json` to the MCP Registry, tokenlessly; enable it with `MCP_PUBLISH_ENABLED=true` ([how](services/mcp-server/README.md#publish)).
+- **`mcp-publish.yml`** — after a release, pushes the MCP server's image, built for amd64 and arm64, to GitHub Container Registry with a build provenance attestation, and its `server.json` to the MCP Registry, tokenlessly; enable it with `MCP_PUBLISH_ENABLED=true` ([how](services/mcp-server/README.md#publish)).
 <!-- ultra:end mcp-server -->
 <!-- ultra:begin release -->
 - **`release.yml`** — release-please on `main`, off until `RELEASE_ENABLED=true`, which `configure-github.mjs` sets. Releases start at `0.1.0`. GitHub holds the checks of a pull request opened by `github-actions[bot]` until someone approves them, so releasing is: open the release pull request, *Approve workflows to run*, wait for `verify`, merge. A `RELEASE_PLEASE_TOKEN` secret holding a GitHub App or personal token removes that step.
@@ -195,6 +201,15 @@ node scripts/template-update.mjs --to vX.Y.Z             # apply, then review, v
 ```
 
 Updates only move forward: a release older than the one the project is on is refused.
+
+The same script changes which features the project has, by the same means: the "after" side is generated with the new selection. Without `--to` it stays on the release the project is on; with it, the release and the selection move in one change. The new selection is recorded in `CHANGELOG.md`, where the next update reads it.
+
+```bash
+node scripts/template-update.mjs --add web --dry-run      # what adding the web app would bring
+node scripts/template-update.mjs --remove py-service      # give up the Python service
+```
+
+A removal is refused, with the paths named, when it would delete a file you changed or leave behind a file of your own inside the feature's directory: move those first, then run it again.
 
 The `update-from-template` skill walks an agent through the whole procedure.
 

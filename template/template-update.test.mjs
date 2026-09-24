@@ -48,9 +48,10 @@ before(() => {
 after(() => rmSync(work, { recursive: true, force: true }));
 
 /** A project made from the first release, committed, as a team would have it. */
-function project(name) {
+function project(name, features = []) {
   const dir = join(work, name);
-  execFileSync(process.execPath, ["template/init.mjs", "--name", "demo-app", "--owner", "octo-org", "--preset", "minimal", "--out", dir], {
+  const selection = features.length === 0 ? ["--preset", "minimal"] : ["--features", features.join(",")];
+  execFileSync(process.execPath, ["template/init.mjs", "--name", "demo-app", "--owner", "octo-org", ...selection, "--out", dir], {
     cwd: join(work, "template"),
     stdio: "ignore",
   });
@@ -179,4 +180,122 @@ test("the origin line is read whichever release wrote it, and the highest versio
   assert.equal(readOrigin(recordUpdate("## [Unreleased]\n\n- Initialized from [ULTRA-TEMPLATE v1.3.1](https://github.com/hynix666/ULTRA-TEMPLATE/releases/tag/v1.3.1) with no features.\n", "https://github.com/hynix666/ULTRA-TEMPLATE", "v1.4.0")).version, "v1.4.0");
   assert.deepEqual(remoteIdentity("git@github.com:octo-org/demo-app.git"), { owner: "octo-org", repo: "demo-app" });
   assert.equal(remoteIdentity("https://gitlab.com/octo-org/demo-app"), null);
+});
+
+/** A project made from the first release with `features`, and the template left at its newest release. */
+function withFeatures(name, features) {
+  git(template, "checkout", "-q", FROM);
+  const dir = project(name, features);
+  git(template, "checkout", "-q", "-");
+  return dir;
+}
+const select = (dir, options) => update({ project: dir, template, owner: "octo-org", repo: "demo-app", log: quiet, ...options });
+const workflow = (dir) => readFileSync(join(dir, ".github/workflows/verify.yml"), "utf8");
+
+test("removing a feature takes its files and its marked lines out, and records the new selection", () => {
+  const dir = withFeatures("remove", ["ts-library", "release"]);
+  assert.match(workflow(dir), /^ {2}ts-library:$/m);
+
+  const result = select(dir, { remove: ["ts-library"] });
+
+  assert.deepEqual(result.conflicts, []);
+  assert.deepEqual(result.features, ["release"]);
+  assert.equal(existsSync(join(dir, "packages/ts-library")), false);
+  assert.doesNotMatch(workflow(dir), /ts-library/);
+  assert.doesNotMatch(readFileSync(join(dir, ".github/dependabot.yml"), "utf8"), /ts-library/);
+  // Still on the release it was on; only the selection moved.
+  const origin = readOrigin(readFileSync(join(dir, "CHANGELOG.md"), "utf8"));
+  assert.equal(origin.version, FROM);
+  assert.deepEqual(origin.features, ["release"]);
+});
+
+test("removing a feature removes its directory whole, installed dependencies included", () => {
+  const dir = withFeatures("remove-installed", ["ts-library"]);
+  // What setup leaves in a module: ignored, so the working tree is still clean.
+  mkdirSync(join(dir, "packages/ts-library/node_modules/pkg"), { recursive: true });
+  writeFileSync(join(dir, "packages/ts-library/node_modules/pkg/index.js"), "");
+  assert.equal(git(dir, "status", "--porcelain"), "");
+
+  select(dir, { remove: ["ts-library"] });
+
+  // A module is present when its directory is; one left holding only node_modules is still "present".
+  assert.equal(existsSync(join(dir, "packages/ts-library")), false);
+});
+
+test("adding a feature brings its files and marked lines in, in the template's order", () => {
+  const dir = withFeatures("add", ["release"]);
+  const result = select(dir, { add: ["ts-library"] });
+  assert.deepEqual(result.conflicts, []);
+  assert.deepEqual(result.features, ["ts-library", "release"]);
+  assert.equal(existsSync(join(dir, "packages/ts-library/package.json")), true);
+  assert.match(workflow(dir), /^ {2}ts-library:$/m);
+  assert.match(readFileSync(join(dir, "CHANGELOG.md"), "utf8"), /Updated to \[ULTRA-TEMPLATE v[\d.]+\]\([^)]+\) with ts-library, release\./);
+});
+
+test("a selection change and a release move are one update", () => {
+  const dir = withFeatures("both", []);
+  const result = select(dir, { to: TO, add: ["release"] });
+  assert.deepEqual(result.conflicts, []);
+  assert.match(readFileSync(join(dir, "SECURITY.md"), "utf8"), new RegExp(NOTE));
+  assert.equal(existsSync(join(dir, ".github/workflows/release.yml")), true);
+  const origin = readOrigin(readFileSync(join(dir, "CHANGELOG.md"), "utf8"));
+  assert.equal(origin.version, TO);
+  assert.deepEqual(origin.features, ["release"]);
+});
+
+test("a dry run of a selection change lists the files and writes nothing", () => {
+  const dir = withFeatures("dry-select", ["release"]);
+  const result = select(dir, { add: ["ts-library"], dryRun: true });
+  assert.equal(result.status, "dry-run");
+  assert.ok(result.changed.some((line) => line === "A packages/ts-library/package.json"), result.changed.join());
+  assert.equal(git(dir, "status", "--porcelain"), "");
+});
+
+test("an impossible selection is refused before anything is written", () => {
+  const dir = withFeatures("refuse-select", ["release"]);
+  const head = git(dir, "rev-parse", "HEAD");
+  assert.throws(() => select(dir, { add: ["release"] }), /release is already one of this project's features/);
+  assert.throws(() => select(dir, { remove: ["web"] }), /web is not one of this project's features: release/);
+  assert.throws(() => select(dir, { add: ["kubernetes"] }), /v[\d.]+ defines no feature kubernetes\. It defines: go-service/);
+  assert.throws(() => select(dir, {}), /Nothing to do/);
+  assert.equal(git(dir, "status", "--porcelain"), "");
+  assert.equal(git(dir, "rev-parse", "HEAD"), head);
+});
+
+test("removing a feature whose files the project changed or added to is refused, by path", () => {
+  const dir = withFeatures("refuse-edited", ["ts-library", "release"]);
+  const readme = join(dir, "packages/ts-library/README.md");
+  writeFileSync(readme, `${readFileSync(readme, "utf8")}\nOur notes.\n`);
+  writeFileSync(join(dir, "packages/ts-library/src/extra.ts"), "export const extra = 1;\n");
+  git(dir, "add", "-A");
+  commit(dir, "feat: our own library work");
+  const head = git(dir, "rev-parse", "HEAD");
+
+  assert.throws(
+    () => select(dir, { remove: ["ts-library"] }),
+    (err) =>
+      err instanceof UpdateError &&
+      /packages\/ts-library\/README\.md \(this project changed it, and the update deletes it\)/.test(err.message) &&
+      /packages\/ts-library\/src\/extra\.ts \(this project's own file, inside a feature being removed\)/.test(err.message),
+  );
+  assert.equal(git(dir, "status", "--porcelain"), "");
+  assert.equal(git(dir, "rev-parse", "HEAD"), head);
+});
+
+test("the selection is read from the newest line that names one, and the first of two at one version", () => {
+  const url = "https://github.com/hynix666/ULTRA-TEMPLATE";
+  const line = (kind, version, features) => `- ${kind} [ULTRA-TEMPLATE ${version}](${url}/releases/tag/${version})${features ? ` with ${features}` : ""}.`;
+  const changelog = [
+    "## [Unreleased]",
+    "",
+    line("Updated to", "v1.3.0"),
+    line("Updated to", "v1.2.0", "web, release"),
+    line("Updated to", "v1.2.0", "release"),
+    line("Initialized from", "v1.1.0", "go-service, release"),
+  ].join("\n");
+  const origin = readOrigin(changelog);
+  assert.equal(origin.version, "v1.3.0");
+  assert.deepEqual(origin.features, ["web", "release"]);
+  assert.match(recordUpdate("## [Unreleased]\n", url, "v1.3.0", []), /v1\.3\.0\) with no features\./);
+  assert.doesNotMatch(recordUpdate("## [Unreleased]\n", url, "v1.3.0"), / with /);
 });

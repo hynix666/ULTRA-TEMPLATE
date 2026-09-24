@@ -11,7 +11,14 @@
  */
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { presentModules, ROOT, run } from "./modules.mjs";
+import { checkNodeVersion, presentModules, ROOT, run } from "./modules.mjs";
+
+// Installing under another Node major than CI's gives a working tree that verifies differently.
+const wrongNode = checkNodeVersion();
+if (wrongNode !== null) {
+  console.error(`setup: ${wrongNode}`);
+  process.exit(1);
+}
 
 let failed = 0;
 for (const module of presentModules()) {

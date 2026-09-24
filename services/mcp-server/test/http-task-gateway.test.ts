@@ -21,7 +21,8 @@ function stubFetch(answer: (call: Call) => Response): { fetch: typeof globalThis
   return { fetch, calls };
 }
 
-const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
+const json = (body: unknown, status = 200) =>
+  new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 const gatewayFor = (fetch: typeof globalThis.fetch) => createHttpTaskGateway({ baseUrl: "http://localhost:8080", timeoutMs: 50, fetch });
 
 test("each call goes to the documented route with the documented body", async () => {
@@ -32,14 +33,36 @@ test("each call goes to the documented route with the documented body", async ()
   await gateway.create("Write the README");
   await gateway.move("t 1/2", "in_progress");
 
-  assert.deepEqual(calls.map((call) => `${call.method} ${call.url}`), [
-    "GET http://localhost:8080/api/tasks",
-    "POST http://localhost:8080/api/tasks",
-    // The id is a path segment, so a slash or a space in one must not change the route.
-    "PATCH http://localhost:8080/api/tasks/t%201%2F2/status",
-  ]);
+  assert.deepEqual(
+    calls.map((call) => `${call.method} ${call.url}`),
+    [
+      "GET http://localhost:8080/api/tasks",
+      "POST http://localhost:8080/api/tasks",
+      // The id is a path segment, so a slash or a space in one must not change the route.
+      "PATCH http://localhost:8080/api/tasks/t%201%2F2/status",
+    ],
+  );
   assert.equal(calls[1]?.body, '{"title":"Write the README"}');
   assert.equal(calls[2]?.body, '{"status":"in_progress"}');
+});
+
+test("finding a task asks for it by id, and a 404 means there is none", async () => {
+  const { fetch, calls } = stubFetch(({ url }) => (url.endsWith("/t1") ? json(task()) : json({ error: "task not found" }, 404)));
+  const gateway = gatewayFor(fetch);
+  assert.deepEqual(await gateway.find("t1"), task());
+  assert.equal(await gateway.find("t 9"), undefined);
+  assert.deepEqual(
+    calls.map((call) => `${call.method} ${call.url}`),
+    ["GET http://localhost:8080/api/tasks/t1", "GET http://localhost:8080/api/tasks/t%209"],
+  );
+});
+
+test("any other failure while finding a task is still a gateway error", async () => {
+  const { fetch } = stubFetch(() => json({ error: "internal error" }, 500));
+  await assert.rejects(
+    () => gatewayFor(fetch).find("t1"),
+    (err: GatewayError) => /returned 500/.test(err.message),
+  );
 });
 
 test("a base URL with a path or a trailing slash still addresses /api/tasks", async () => {

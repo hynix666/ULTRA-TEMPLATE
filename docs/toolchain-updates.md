@@ -8,7 +8,7 @@ Weekly, grouped, as pull requests that must pass `verify` like any other.
 
 - **GitHub Actions** — every `uses:` is a commit SHA with its version as a comment; Dependabot moves both together.
 - **Container base images** — each `FROM` carries a digest as well as a tag, and Dependabot updates the digest within the tag. It does not move the language version in the tag; that is the next section's job.
-- **Each module's dependencies** — every npm lockfile, `go.mod`, and `uv.lock`, one group per module.
+- **Each module's dependencies** — every npm lockfile, `go.mod`, and `uv.lock`, one group per module. Biome is among them, pinned exactly because its formatter's output can change between releases: an update that changes layout carries the reformat in the same pull request ([ADR-0012](adr/0012-lint-and-format-typescript-with-biome.md)).
 <!-- ultra:begin devcontainer -->
 - **Dev Container features** — the toolchain features in `.devcontainer/devcontainer.json`.
 <!-- ultra:end devcontainer -->
@@ -28,7 +28,7 @@ Dependabot holds these back on purpose. A language version is read in several pl
 
 ## Pinned by hand — check at every minor release
 
-Nothing updates these, so they are part of the release checklist. Each is a version and, for a downloaded binary, a checksum taken from the release itself.
+Nothing updates these, so they are part of the release checklist. Each is a version and, for a downloaded binary, a checksum taken from the release itself. `pins.yml` lists every one of them each week beside its latest release, from `scripts/check-pins.mjs`, whose tests fail when a workflow gains a pin the list does not have; it reports, and the move stays a person's.
 
 - **gitleaks** — `GITLEAKS_VERSION` and `GITLEAKS_SHA256` in `.github/workflows/security.yml`.
 - **actionlint** — `ACTIONLINT_VERSION` and `ACTIONLINT_SHA256` in `.github/actions/setup-actionlint/action.yml`.

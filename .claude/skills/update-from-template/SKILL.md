@@ -16,3 +16,12 @@ This project was generated from a repository template and keeps none of its hist
 7. **Land it as its own pull request**, titled `chore: update from the template, vX.Y.Z`, with the release notes linked. The script has already added the `Updated to` line to `CHANGELOG.md`; keep it, because the next update starts from there.
 
 Skip a release only by moving to a later one: updates are cumulative, and the script computes the whole difference between any two releases.
+
+## Changing which features this project has
+
+The same script adds or removes features, at the release the project is on, or together with a release move when `--to` is given too.
+
+1. **Look first.** `node scripts/template-update.mjs --add web --dry-run` (or `--remove py-service`) lists every file that would arrive or go. Ids are comma-separated, as init's `--features` are.
+2. **Clear the way for a removal.** It is refused, with each path named, when it would delete a file the project changed or leave a file of the project's own inside the feature's directory. Decide where that work belongs, move or delete it in its own commit, then run the removal again.
+3. **Apply, then prove it**, as above: `node scripts/setup.mjs`, `node scripts/verify.mjs`. An added module arrives without its dependencies installed.
+4. **Land it as its own pull request**, titled `feat: add <feature> from the template` or `chore: remove <feature>`. Keep the `Updated to … with <features>` line the script writes into `CHANGELOG.md`: the next update reads the selection from it.

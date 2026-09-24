@@ -12,19 +12,24 @@
     "check:boundaries": "node scripts/check-boundaries.mjs",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "verify": "npm run check:boundaries && npm run typecheck && npm test && npm run build"
+    "coverage": "vitest run --coverage.enabled --coverage.provider=v8 --coverage.reporter=lcov --coverage.reportsDirectory=coverage",
+    "lint": "biome ci .",
+    "verify": "npm run lint && npm run check:boundaries && npm run typecheck && npm test && npm run build",
+    "rules": "node scripts/print-rules.ts"
   },
   "dependencies": {
     "react": "^19.3.0",
     "react-dom": "^19.3.0"
   },
   "devDependencies": {
+    "@biomejs/biome": "2.5.14",
     "@testing-library/dom": "^10.4.2",
     "@testing-library/react": "^16.3.3",
     "@types/node": "^24.13.5",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "@vitejs/plugin-react": "^6.1.1",
+    "@vitest/coverage-v8": "^5.0.1",
     "happy-dom": "^20.14.5",
     "typescript": "^7.0.2",
     "vite": "^8.3.0",

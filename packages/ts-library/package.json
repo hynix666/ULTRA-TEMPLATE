@@ -31,12 +31,16 @@
     "typecheck": "tsc --noEmit",
     "test": "node --test \"test/**/*.test.ts\"",
     "check:package": "publint --strict && attw --pack . --profile esm-only",
-    "verify": "npm run typecheck && npm test && npm run build && npm run check:package && npm run check:install",
+    "coverage": "node -e \"require('node:fs').mkdirSync('coverage', { recursive: true })\" && node --test --experimental-test-coverage --test-coverage-exclude=\"test/**\" --test-reporter=lcov --test-reporter-destination=coverage/lcov.info \"test/**/*.test.ts\"",
+    "lint": "biome ci .",
+    "verify": "npm run lint && npm run typecheck && npm test && npm run build && npm run check:package && npm run check:install",
     "prepack": "npm run build",
-    "check:install": "node scripts/check-install.mjs"
+    "check:install": "node scripts/check-install.mjs",
+    "rules": "node scripts/print-rules.ts"
   },
   "devDependencies": {
     "@arethetypeswrong/cli": "^0.18.5",
+    "@biomejs/biome": "2.5.14",
     "@types/node": "^24.13.5",
     "publint": "^0.3.24",
     "typescript": "^7.0.2"

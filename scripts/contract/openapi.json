@@ -1,0 +1,121 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Task API",
+    "version": "1.0.0",
+    "description": "The task API every task service in this repository serves. It is held to the contract cases beside it, scripts/contract/tasks-api.json, and to the task rules in scripts/rules/task-rules.json, by checkSpec in scripts/check-contract.mjs: every response documented here is exercised by a case, every case on a documented operation answers with a status documented here, and the schemas state the same fields, statuses and title length. A method a path does not list is answered 405, and a path not listed here 404, both with an Error body. Every response carries the RequestId header, and every request is logged once as one JSON line; the contract check reads both."
+  },
+  "paths": {
+    "/healthz": {
+      "get": {
+        "summary": "Report that the service is up",
+        "operationId": "health",
+        "responses": {
+          "200": { "description": "The service is up", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Health" } } } }
+        }
+      }
+    },
+    "/api/tasks": {
+      "get": {
+        "summary": "List every task, oldest first",
+        "operationId": "listTasks",
+        "responses": {
+          "200": { "description": "Every task", "content": { "application/json": { "schema": { "type": "array", "items": { "$ref": "#/components/schemas/Task" } } } } }
+        }
+      },
+      "post": {
+        "summary": "Create a task in the todo status",
+        "operationId": "createTask",
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/CreateTask" } } } },
+        "responses": {
+          "201": { "description": "The task, created", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Task" } } } },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "422": { "description": "The title is empty once trimmed, or longer than the rules allow", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+        }
+      }
+    },
+    "/api/tasks/{id}": {
+      "parameters": [{ "$ref": "#/components/parameters/TaskId" }],
+      "get": {
+        "summary": "Get one task",
+        "operationId": "getTask",
+        "responses": {
+          "200": { "description": "The task", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Task" } } } },
+          "400": { "description": "The id is not a valid path segment, such as a malformed percent-escape" },
+          "404": { "$ref": "#/components/responses/NotFound" }
+        }
+      }
+    },
+    "/api/tasks/{id}/status": {
+      "parameters": [{ "$ref": "#/components/parameters/TaskId" }],
+      "patch": {
+        "summary": "Move a task to another status",
+        "operationId": "moveTask",
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/MoveTask" } } } },
+        "responses": {
+          "200": { "description": "The task, moved", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Task" } } } },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "409": { "description": "The rules do not allow this move from the task's status, staying put included", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "422": { "description": "The status is missing, null, or not one of the statuses", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+        }
+      }
+    }
+  },
+  "components": {
+    "parameters": {
+      "TaskId": { "name": "id", "in": "path", "required": true, "schema": { "type": "string", "minLength": 1 } }
+    },
+    "headers": {
+      "RequestId": {
+        "description": "The X-Request-Id the caller sent when it matches the pattern, otherwise a new one. The same id is in the request's log line.",
+        "schema": { "type": "string", "pattern": "^[A-Za-z0-9._-]{1,128}$" }
+      }
+    },
+    "responses": {
+      "BadRequest": { "description": "The body is not one JSON object of the documented fields, or is over 1 MiB", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+      "NotFound": { "description": "No task has this id", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+    },
+    "schemas": {
+      "Health": {
+        "type": "object",
+        "required": ["status"],
+        "properties": { "status": { "const": "ok" } },
+        "additionalProperties": false
+      },
+      "Task": {
+        "type": "object",
+        "required": ["id", "title", "status", "createdAt", "updatedAt"],
+        "properties": {
+          "id": { "type": "string" },
+          "title": { "type": "string", "minLength": 1, "maxLength": 200, "description": "Trimmed; the length is counted in characters (code points), not bytes" },
+          "status": { "$ref": "#/components/schemas/Status" },
+          "createdAt": { "type": "string", "format": "date-time" },
+          "updatedAt": { "type": "string", "format": "date-time" }
+        },
+        "additionalProperties": false
+      },
+      "Status": { "type": "string", "enum": ["todo", "in_progress", "done"] },
+      "CreateTask": {
+        "type": "object",
+        "properties": {
+          "title": { "type": ["string", "null"], "maxLength": 200, "description": "Trimmed before it is checked; a missing or null title reads as empty, and is refused with 422" }
+        },
+        "additionalProperties": false
+      },
+      "MoveTask": {
+        "type": "object",
+        "properties": {
+          "status": { "description": "One of the statuses; anything else, null or a missing status is refused with 422" }
+        },
+        "additionalProperties": false
+      },
+      "Error": {
+        "type": "object",
+        "required": ["error"],
+        "properties": { "error": { "type": "string" } },
+        "additionalProperties": false
+      }
+    }
+  }
+}

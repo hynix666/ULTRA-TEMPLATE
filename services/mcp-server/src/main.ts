@@ -8,10 +8,10 @@
 import { serveStdio } from "@modelcontextprotocol/server/stdio";
 import { createHttpTaskGateway } from "./adapters/http-task-gateway.ts";
 import { createServer } from "./adapters/mcp.ts";
-import { ConfigError, loadConfig } from "./config.ts";
+import { type Config, ConfigError, loadConfig } from "./config.ts";
 
 function run(): number {
-  let config;
+  let config: Config;
   try {
     config = loadConfig(process.env);
   } catch (err) {

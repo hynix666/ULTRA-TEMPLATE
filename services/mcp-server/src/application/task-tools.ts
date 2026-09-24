@@ -9,6 +9,12 @@ import type { TaskGateway } from "./ports.ts";
 
 export const listTasks = (gateway: TaskGateway): Promise<readonly Task[]> => gateway.list();
 
+export async function getTask(gateway: TaskGateway, id: string): Promise<Task> {
+  const task = await gateway.find(id);
+  if (task === undefined) throw new DomainError("NOT_FOUND", `no task with id "${id}"; list_tasks names every task`);
+  return task;
+}
+
 export async function createTask(gateway: TaskGateway, title: string): Promise<Task> {
   return gateway.create(validateTitle(title));
 }
@@ -19,8 +25,7 @@ export async function createTask(gateway: TaskGateway, title: string): Promise<T
  */
 export async function moveTask(gateway: TaskGateway, id: string, status: unknown): Promise<Task> {
   const target = parseStatus(status);
-  const task = (await gateway.list()).find((candidate) => candidate.id === id);
-  if (task === undefined) throw new DomainError("NOT_FOUND", `no task with id "${id}"`);
+  const task = await getTask(gateway, id);
   checkTransition(task.status, target);
   return gateway.move(id, target);
 }

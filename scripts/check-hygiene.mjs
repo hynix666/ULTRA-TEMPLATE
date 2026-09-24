@@ -25,8 +25,16 @@
  *  11. No tracked source or config file contains an invisible or text-reordering character. A human
  *      reviewer sees nothing where an agent reads a hidden instruction, or code runs other than shown.
  *  12. No tracked source or config file holds an absolute path into someone's home directory.
- *  13. Every module present tracks the manifest and lockfile its toolchain installs from, and a
- *      Node module's manifest has the `verify` script both verify.mjs and its CI job run.
+ *  13. Every module present tracks the manifest and lockfile its toolchain installs from, a Node
+ *      module's manifest has the `verify` script both verify.mjs and its CI job run, verify.yml has a
+ *      job named after the module, and dependabot.yml an entry for its directory. Deleting the job
+ *      or the entry leaves everything green while CI stops checking the module and its dependencies
+ *      stop moving.
+ *  14. Every Dockerfile `FROM` names its base image by digest. A tag can be repointed at a different
+ *      image with no diff here, the exposure ADR-0003 pins actions against.
+ *  15. A download in a workflow or local action that keeps a file is verified against a checksum in
+ *      the same step, and no download is piped into an interpreter, which runs it before anything
+ *      could check it.
  *
  *   node scripts/check-hygiene.mjs
  *
@@ -47,7 +55,7 @@ export const MAX_TRACKED_BYTES = 4 * 1024 * 1024;
 export const JSONC = /(^|\/)(tsconfig(\.[\w-]+)?\.json|devcontainer\.json)$|(^|\/)\.vscode\//;
 export const MARKER = /ultra:(?:begin|end)\s+[a-z0-9-]+/;
 
-const TEXT_SOURCE = /\.(mjs|cjs|js|jsx|ts|tsx|mts|go|py|toml|sh|ya?ml|json|md|c4|css|html)$/;
+const TEXT_SOURCE = /\.(mjs|cjs|js|jsx|ts|tsx|mts|go|py|toml|sh|ya?ml|jsonc?|md|c4|css|html)$/;
 // Tab, LF and CR are the only C0 characters text needs; anything else belongs in an escape.
 const CONTROL_CHAR = /[\x00-\x08\x0B\x0C\x0E-\x1F]/;
 // Characters that render as nothing, or reorder what is shown, while a program — or an agent — still
@@ -93,12 +101,22 @@ const MODULE_FILES = { node: ["package.json", "package-lock.json"], python: ["py
  */
 export function checkModules(tracked, read) {
   const failures = [];
+  // Read only when tracked: deleting either file is a decision, and a rule that crashed on it would
+  // report the wrong thing.
+  const jobs = tracked.includes(GATE) ? jobIds(read(GATE)) : null;
+  const updated = tracked.includes(DEPENDABOT) ? dependabotDirectories(read(DEPENDABOT)) : null;
   for (const module of MODULES) {
     if (!tracked.some((path) => path.startsWith(`${module.dir}/`))) continue;
     for (const file of MODULE_FILES[module.toolchain]) {
       if (!tracked.includes(`${module.dir}/${file}`)) {
         failures.push(`\`${module.dir}\` is present but does not track \`${file}\`, so it installs a dependency tree nothing pins.`);
       }
+    }
+    if (jobs !== null && !jobs.includes(module.id)) {
+      failures.push(`\`${module.dir}\` is present but \`verify.yml\` has no \`${module.id}\` job, so CI never runs its checks.`);
+    }
+    if (updated !== null && !updated.includes(`/${module.dir}`)) {
+      failures.push(`\`${DEPENDABOT}\` has no entry for \`/${module.dir}\`, so its dependencies are never proposed for update.`);
     }
     if (module.toolchain !== "node" || !tracked.includes(`${module.dir}/package.json`)) continue;
     let manifest;
@@ -113,6 +131,140 @@ export function checkModules(tracked, read) {
     }
   }
   return failures;
+}
+
+const GATE = ".github/workflows/verify.yml";
+const DEPENDABOT = ".github/dependabot.yml";
+
+/** The directories dependabot.yml updates, from `directory:` and from `directories:` lists. */
+function dependabotDirectories(text) {
+  const found = [];
+  for (const line of text.split(/\r?\n/)) {
+    const entry = /^\s*(?:-\s*)?directory:\s*["']?([^"'\s#]+)/.exec(line) ?? /^\s*-\s*["']?(\/[^"'\s#]*)/.exec(line);
+    if (entry) found.push(entry[1].length > 1 ? entry[1].replace(/\/$/, "") : entry[1]);
+  }
+  return found;
+}
+
+/** The job ids of a workflow, in the two-space layout this repository writes. */
+export function jobIds(text) {
+  const lines = text.split(/\r?\n/);
+  const start = lines.findIndex((l) => /^jobs:\s*$/.test(l));
+  const ids = [];
+  for (let i = start + 1; start !== -1 && i < lines.length; i++) {
+    if (/^[^\s#]/.test(lines[i])) break;
+    const opened = /^ {2}([A-Za-z0-9_-]+):\s*$/.exec(lines[i]);
+    if (opened) ids.push(opened[1]);
+  }
+  return ids;
+}
+
+/** Rule 14. Stage aliases and `scratch` name no image; anything else must carry a full digest. */
+export function checkDigests(path, text) {
+  const problems = [];
+  const stages = new Set();
+  text.split(/\r?\n/).forEach((line, i) => {
+    const from = /^\s*FROM\s+(.+)$/i.exec(line);
+    if (!from) return;
+    const words = from[1].trim().split(/\s+/).filter((w) => !w.startsWith("--"));
+    const [image = "", keyword, alias] = words;
+    if (keyword?.toLowerCase() === "as" && alias) stages.add(alias.toLowerCase());
+    if (image.toLowerCase() === "scratch" || stages.has(image.toLowerCase()) && image.toLowerCase() !== alias?.toLowerCase()) return;
+    if (image.includes("$")) {
+      problems.push(`${path}:${i + 1} names its base image through \`${image}\`, so no digest can be checked. Write the image with \`@sha256:\`.`);
+    } else if (!/@sha256:[0-9a-f]{64}$/.test(image)) {
+      problems.push(`${path}:${i + 1} names base image \`${image}\` by tag alone. Add its digest (\`@sha256:…\`): a tag can be repointed.`);
+    }
+  });
+  return problems;
+}
+
+const INTERPRETERS = new Set(["sh", "bash", "zsh", "dash", "ksh", "python", "python3", "node", "perl", "ruby", "pwsh"]);
+// A download piped into one of these is written to disk, and so is a file to verify.
+const UNPACKERS = new Set(["tar", "unzip", "tee", "cpio", "gunzip", "bsdtar"]);
+const CHECKSUM = /\b(?:sha256sum|shasum)\b/;
+const WORDS = /"[^"]*"|'[^']*'|\S+/g;
+const nowhere = (target) => target === "-" || target === "/dev/null" || target.startsWith("&");
+
+/**
+ * What one downloader command does with what it fetches: "file" when it keeps one, "pipe:<cmd>" when
+ * it feeds an interpreter, or null. `words` is one pipeline stage; `rest` are the stages after it.
+ */
+function downloadEffect(words, rest) {
+  const tool = words[0];
+  let keeps = tool === "wget";
+  let wgetTarget = null;
+  for (let i = 1; i < words.length; i++) {
+    const word = words[i];
+    const redirect = /^1?>>?(.*)$/.exec(word);
+    if (redirect) {
+      const target = redirect[1] || words[i + 1] || "";
+      if (!nowhere(target)) keeps = true;
+      continue;
+    }
+    if (tool === "curl") {
+      if (word === "-o" || word === "--output") keeps ||= !nowhere(words[i + 1] ?? "-");
+      else if (word.startsWith("--output=")) keeps ||= !nowhere(word.slice(9));
+      else if (word === "--remote-name" || word === "--remote-name-all") keeps = true;
+      else if (/^-[A-Za-z]+$/.test(word)) {
+        if (word.includes("O")) keeps = true;
+        if (word.endsWith("o")) keeps ||= !nowhere(words[i + 1] ?? "-");
+      }
+    } else {
+      const short = /^-[A-Za-z]*O(.*)$/.exec(word);
+      if (short) wgetTarget = short[1] || words[i + 1] || "";
+      else if (word === "--output-document") wgetTarget = words[i + 1] ?? "";
+      else if (word.startsWith("--output-document=")) wgetTarget = word.slice(18);
+    }
+  }
+  if (wgetTarget !== null && nowhere(wgetTarget)) keeps = false;
+  for (const stage of rest) {
+    const command = stage.find((w) => w !== "sudo" && !/^[A-Za-z_][A-Za-z0-9_]*=/.test(w) && !w.startsWith("-"));
+    if (command === undefined) continue;
+    const name = command.split("/").at(-1);
+    if (INTERPRETERS.has(name)) return `pipe:${name}`;
+    if (UNPACKERS.has(name)) keeps = true;
+  }
+  return keeps ? "file" : null;
+}
+
+// Words that may stand before a command: the YAML item and key, shell keywords, and env assignments.
+const PREFIX = /^(?:-|run:|if|then|do|else|!|sudo|time|[A-Za-z_][A-Za-z0-9_]*=\S*)$/;
+/** Where curl or wget starts in a pipeline stage, or -1 when the stage does not run one. */
+function downloader(stage) {
+  const at = stage.findIndex((word) => word === "curl" || word === "wget");
+  return at !== -1 && stage.slice(0, at).every((word) => PREFIX.test(word)) ? at : -1;
+}
+
+/** Rule 15, for one workflow or action file. A step is the YAML list item a line sits in. */
+export function checkDownloads(path, text) {
+  const lines = text.split(/\r?\n/);
+  const problems = [];
+  const indent = (line) => line.length - line.trimStart().length;
+  for (let i = 0; i < lines.length; i++) {
+    if (/^\s*#/.test(lines[i]) || !/(?:^|[\s;&|(`])(?:curl|wget)\s/.test(lines[i])) continue;
+    let command = lines[i];
+    for (let j = i; /\\\s*$/.test(lines[j]) && j + 1 < lines.length; j++) command = `${command.replace(/\\\s*$/, " ")}${lines[j + 1]}`;
+    let start = i;
+    while (start > 0 && !/^\s*- /.test(lines[start])) start--;
+    const depth = indent(lines[start]);
+    let end = start + 1;
+    while (end < lines.length && !(lines[end].trim() !== "" && (indent(lines[end]) < depth || indent(lines[end]) === depth && /^\s*- /.test(lines[end])))) end++;
+    const verified = lines.slice(start, end).some((l) => !/^\s*#/.test(l) && CHECKSUM.test(l));
+    for (const segment of command.split(/&&|\|\||;/)) {
+      const stages = segment.split("|").map((stage) => stage.match(WORDS) ?? []);
+      const at = stages.findIndex((stage) => downloader(stage) !== -1);
+      if (at === -1) continue;
+      const words = stages[at].slice(downloader(stages[at]));
+      const effect = downloadEffect(words, stages.slice(at + 1));
+      if (effect?.startsWith("pipe:")) {
+        problems.push(`${path}:${i + 1} pipes a download into \`${effect.slice(5)}\`, which runs it before anything can check it. Download to a file, verify its checksum, then run it.`);
+      } else if (effect === "file" && !verified) {
+        problems.push(`${path}:${i + 1} downloads a file with no checksum in the same step. Verify it with \`sha256sum -c\` against the digest the release publishes.`);
+      }
+    }
+  }
+  return problems;
 }
 
 export const containsDir = (path, dir) => path === dir || path.startsWith(`${dir}/`) || path.includes(`/${dir}/`);
@@ -275,12 +427,11 @@ export function checkRepoHygiene(root = process.cwd()) {
     if (leftovers.length > 0) failures.push(`template marker line(s) survived initialization: ${leftovers.join(", ")}.`);
   }
 
-  for (const path of present.filter((p) => WORKFLOW.test(p))) failures.push(...checkWorkflow(path, read(path)));
-  for (const path of present.filter((p) => /(^|\/)Dockerfile$/.test(p))) failures.push(...checkInstalls(path, read(path)));
+  for (const path of present.filter((p) => WORKFLOW.test(p))) failures.push(...checkDownloads(path, read(path)), ...checkWorkflow(path, read(path)));
+  for (const path of present.filter((p) => /(^|\/)Dockerfile$/.test(p))) failures.push(...checkDigests(path, read(path)), ...checkInstalls(path, read(path)));
   failures.push(...checkModules(tracked, read));
 
-  const gate = ".github/workflows/verify.yml";
-  if (present.includes(gate)) failures.push(...checkGate(gate, read(gate)));
+  if (present.includes(GATE)) failures.push(...checkGate(GATE, read(GATE)));
 
   const withControl = [];
   for (const path of present.filter((p) => TEXT_SOURCE.test(p))) {

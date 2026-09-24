@@ -6,7 +6,7 @@
  * edit, and no file can claim a module that is not there.
  */
 import { spawnSync } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -41,3 +41,22 @@ export function run(command, args, { cwd = ROOT, capture = false } = {}) {
 }
 
 export const available = (command, args = ["version"]) => run(command, args, { capture: true }).status === 0;
+
+/**
+ * Why the running Node is not the one `.node-version` pins, or null when it is. Only the major version
+ * is compared: CI's setup-node reads the same file and installs the newest release of that major, so a
+ * different minor is what CI would run too, while a different major type-strips, resolves and reports
+ * differently, and a pass on it predicts nothing.
+ */
+export function nodeVersionProblem(pinned, running = process.versions.node) {
+  const want = /^v?(\d+)/.exec(pinned.trim())?.[1];
+  const have = /^v?(\d+)/.exec(running)?.[1];
+  if (want === undefined) return `.node-version holds "${pinned.trim()}", which names no Node major version.`;
+  return want === have ? null : `this is Node ${running}, but .node-version pins Node ${want}, which CI runs. Switch to Node ${want} (nvm, fnm, mise and asdf read .node-version).`;
+}
+
+/** nodeVersionProblem for this checkout, or null when it has no .node-version. */
+export function checkNodeVersion(root = ROOT) {
+  const file = join(root, ".node-version");
+  return existsSync(file) ? nodeVersionProblem(readFileSync(file, "utf8")) : null;
+}
