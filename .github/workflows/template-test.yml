@@ -85,9 +85,11 @@ jobs:
         if: steps.needs.outputs.python == 'true'
         with:
           version: ${{ steps.needs.outputs.uv }}
-      - uses: ./.github/actions/tool
-        with:
-          names: actionlint zizmor
+      # Every pinned tool the project's checks run, as a contributor installs them: the chassis's
+      # (actionlint, zizmor) and its toolchains' (golangci-lint with Go). verify fails in CI on a check
+      # it would skip for want of one, so a tool missing here would fail the preset, not pass it unchecked.
+      - name: The pinned tools this project runs
+        run: node scripts/tools.mjs install --local
 
       - name: Install and verify the initialized project
         run: |
