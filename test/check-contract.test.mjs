@@ -4,6 +4,10 @@ import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import { test } from "node:test";
 import { encodeBody, judge, loadCases, runCases } from "../scripts/check-contract.mjs";
+import { loadRules } from "../scripts/check-rules.mjs";
+
+// The moves the fake service allows unless `mistakes.moves` says otherwise.
+const MOVES = { todo: ["in_progress"], in_progress: ["todo", "done"], done: [] };
 
 /** A minimal task service that is right about everything except what `mistakes` says. */
 function fakeService(t, mistakes = {}) {
@@ -26,6 +30,15 @@ function fakeService(t, mistakes = {}) {
       }
       const match = /^\/api\/tasks\/([^/]+)$/.exec(req.url ?? "");
       if (match && req.method === "GET") return tasks.has(match[1]) ? send(200, tasks.get(match[1])) : send(404, { error: "task not found" });
+      const move = /^\/api\/tasks\/([^/]+)\/status$/.exec(req.url ?? "");
+      if (move && req.method === "PATCH") {
+        const task = tasks.get(move[1]);
+        if (!task) return send(404, { error: "task not found" });
+        const next = JSON.parse(raw || "{}").status;
+        if (!(mistakes.moves ?? MOVES)[task.status].includes(next)) return send(409, { error: "status transition not allowed" });
+        tasks.set(task.id, { ...task, status: next });
+        return send(200, tasks.get(task.id));
+      }
       return send(404, { error: "not found" });
     });
   });
@@ -59,6 +72,43 @@ test("the right status with an error that is not JSON still fails", async (t) =>
   assert.match(failures[1].problems.join(), /no \{"error"|content-type text\/plain/);
 });
 
+const moveTo = (status) => ({ method: "PATCH", path: "/api/tasks/{id}/status", body: JSON.stringify({ status }), status: 200 });
+
+test("setup steps stage the task a case is sent to", async (t) => {
+  const cases = [
+    { name: "done from in progress", ...moveTo("done"), setup: [moveTo("in_progress")], task: { status: "done" } },
+    { name: "nothing leaves done", ...moveTo("todo"), status: 409, error: true, setup: [moveTo("in_progress"), moveTo("done")] },
+  ];
+  assert.deepEqual(await runCases(await fakeService(t), cases), []);
+});
+
+test("a setup step that does not land is reported as itself, and its case is not sent", async (t) => {
+  // This service cannot start a task, so no case staged from in_progress can be judged.
+  const stuck = { todo: [], in_progress: ["todo", "done"], done: [] };
+  const cases = [{ name: "done from in progress", ...moveTo("done"), setup: [moveTo("in_progress")], task: { status: "done" } }];
+  const failures = await runCases(await fakeService(t, { moves: stuck }), cases);
+  assert.deepEqual(failures.map((f) => f.name), ["done from in progress"]);
+  assert.deepEqual(failures[0].problems, ["setup 1 (PATCH /api/tasks/t1/status) answered 409, expected 200"]);
+});
+
+test("the contract states every pair of statuses, legal or not, as the rules do", () => {
+  const { statuses, transitions } = loadRules();
+  const moves = new Map();
+  for (const c of loadCases()) {
+    if (c.method !== "PATCH" || c.path !== "/api/tasks/{id}/status" || typeof c.body !== "string") continue;
+    const body = JSON.parse(c.body || "null");
+    if (body === null || Object.keys(body).join() !== "status" || !statuses.includes(body.status)) continue;
+    const staged = (c.setup ?? []).filter((step) => step.path === c.path).map((step) => JSON.parse(step.body).status);
+    moves.set(`${staged.at(-1) ?? "todo"} → ${body.status}`, c.status);
+  }
+  for (const from of statuses) {
+    for (const to of statuses) {
+      const expected = transitions[from].includes(to) ? 200 : 409;
+      assert.equal(moves.get(`${from} → ${to}`), expected, `the move ${from} → ${to} should be a case answered ${expected}`);
+    }
+  }
+});
+
 test("judge checks the task's fields and values, not only the status", () => {
   const answer = (body) => ({ status: 201, type: "application/json", text: JSON.stringify(body) });
   const wanted = { status: 201, task: { status: "todo" } };
@@ -75,6 +125,11 @@ test("the committed cases are well formed and each name is unique", () => {
     assert.match(c.method, /^(GET|HEAD|POST|PUT|PATCH|DELETE|OPTIONS)$/, c.name);
     assert.ok(c.path.startsWith("/"), c.name);
     assert.ok(Number.isInteger(c.status), c.name);
+    for (const step of c.setup ?? []) {
+      assert.match(step.method, /^(GET|POST|PUT|PATCH|DELETE)$/, `${c.name}: setup`);
+      assert.ok(step.path.startsWith("/"), `${c.name}: setup`);
+      assert.ok(Number.isInteger(step.status), `${c.name}: setup`);
+    }
   }
   // Large bodies are described, not stored: the file stays small and reviewable.
   assert.equal(JSON.parse(encodeBody({ title: { repeat: "ab", times: 3 } })).title, "ababab");

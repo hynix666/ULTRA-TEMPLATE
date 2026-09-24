@@ -85,20 +85,40 @@ export function judge(testCase, answer) {
   return problems;
 }
 
-/** Runs every case against a service already listening at `base`. Returns the mismatches. */
+/**
+ * Runs every case against a service already listening at `base`. Returns the mismatches.
+ *
+ * A case may list `setup` requests, sent first to bring its task to the state the case is about, such
+ * as a task already done. Each is judged on its status alone. One that does not land is reported as
+ * itself and the case is not sent: a service that cannot reach a state has not answered the question
+ * asked from it.
+ */
 export async function runCases(base, cases) {
   const failures = [];
   for (const testCase of cases) {
-    let path = testCase.path;
-    if (path.includes("{id}")) {
+    const setup = testCase.setup ?? [];
+    let id;
+    if ([testCase, ...setup].some((request) => request.path.includes("{id}"))) {
       const created = await send(base, { method: "POST", path: "/api/tasks", body: '{"title":"contract"}' });
-      const id = parse(created.text)?.id;
+      id = parse(created.text)?.id;
       if (created.status !== 201 || typeof id !== "string") {
         failures.push({ name: testCase.name, problems: [`could not create the task this case needs (${created.status})`] });
         continue;
       }
-      path = path.replace("{id}", encodeURIComponent(id));
     }
+    const resolve = (path) => (id === undefined ? path : path.replace("{id}", encodeURIComponent(id)));
+    let staged = true;
+    for (const [index, step] of setup.entries()) {
+      const path = resolve(step.path);
+      const answer = await send(base, { ...step, path }).catch(() => null);
+      if (answer?.status !== step.status) {
+        failures.push({ name: testCase.name, problems: [`setup ${index + 1} (${step.method} ${path}) answered ${answer?.status ?? "with invalid HTTP"}, expected ${step.status}`] });
+        staged = false;
+        break;
+      }
+    }
+    if (!staged) continue;
+    const path = resolve(testCase.path);
     let answer;
     try {
       answer = await send(base, { ...testCase, path });
