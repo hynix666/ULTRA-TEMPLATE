@@ -10,7 +10,8 @@
     "check:boundaries": "node scripts/check-boundaries.mjs",
     "typecheck": "tsc --noEmit",
     "test": "node --test \"test/**/*.test.ts\"",
-    "verify": "npm run check:boundaries && npm run typecheck && npm test"
+    "verify": "npm run check:boundaries && npm run typecheck && npm test",
+    "rules": "node scripts/print-rules.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/server": "^2.0.0",

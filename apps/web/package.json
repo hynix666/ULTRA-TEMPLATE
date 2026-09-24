@@ -12,7 +12,8 @@
     "check:boundaries": "node scripts/check-boundaries.mjs",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "verify": "npm run check:boundaries && npm run typecheck && npm test && npm run build"
+    "verify": "npm run check:boundaries && npm run typecheck && npm test && npm run build",
+    "rules": "node scripts/print-rules.ts"
   },
   "dependencies": {
     "react": "^19.3.0",

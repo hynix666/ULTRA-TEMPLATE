@@ -173,6 +173,8 @@ jobs:
       - run: npm ci --ignore-scripts
       - run: npm audit signatures
       - run: npm run verify
+      - name: The task rules
+        run: node ../../scripts/check-rules.mjs mcp-server
       - name: Container image starts and speaks MCP
         run: |
           docker build --tag mcp-server:ci .
@@ -245,6 +247,8 @@ jobs:
       - run: npm ci --ignore-scripts
       - run: npm audit signatures
       - run: npm run verify
+      - name: The task rules
+        run: node ../../scripts/check-rules.mjs web
   # ultra:end web
 
   # ultra:begin ts-library
@@ -266,6 +270,8 @@ jobs:
       - run: npm ci --ignore-scripts
       - run: npm audit signatures
       - run: npm run verify
+      - name: The task rules
+        run: node ../../scripts/check-rules.mjs ts-library
   # ultra:end ts-library
 
   # ultra:begin architecture

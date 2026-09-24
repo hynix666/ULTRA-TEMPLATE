@@ -33,7 +33,8 @@
     "check:package": "publint --strict && attw --pack . --profile esm-only",
     "verify": "npm run typecheck && npm test && npm run build && npm run check:package && npm run check:install",
     "prepack": "npm run build",
-    "check:install": "node scripts/check-install.mjs"
+    "check:install": "node scripts/check-install.mjs",
+    "rules": "node scripts/print-rules.ts"
   },
   "devDependencies": {
     "@arethetypeswrong/cli": "^0.18.5",

@@ -17,6 +17,9 @@ import { join } from "node:path";
 // ultra:begin go-service|ts-service|py-service
 import { TASK_SERVICES } from "./check-contract.mjs";
 // ultra:end go-service|ts-service|py-service
+// ultra:begin mcp-server|web|ts-library
+import { RULE_MODULES } from "./check-rules.mjs";
+// ultra:end mcp-server|web|ts-library
 import { available, MODULES, presentModules, ROOT, run } from "./modules.mjs";
 
 const results = [];
@@ -102,6 +105,10 @@ for (const module of present) {
   // Each task service is also held to the one contract all of them share (ADR-0008).
   if (TASK_SERVICES.includes(module.id)) step(`${module.id}: contract`, "node", ["scripts/check-contract.mjs", module.id]);
   // ultra:end go-service|ts-service|py-service
+  // ultra:begin mcp-server|web|ts-library
+  // A module that repeats the task rules without serving them is held to their one statement (ADR-0010).
+  if (RULE_MODULES.includes(module.id)) step(`${module.id}: task rules`, "node", ["scripts/check-rules.mjs", module.id]);
+  // ultra:end mcp-server|web|ts-library
 }
 
 const icon = { pass: "✔", fail: "✘", skipped: "–" };
