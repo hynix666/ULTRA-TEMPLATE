@@ -1,0 +1,275 @@
+/**
+ * The hand-pinned tools, from their one manifest: scripts/tools/tools.json.
+ *
+ * Dependabot moves actions, images and module dependencies. The tools a workflow downloads by version
+ * it cannot see, so each is written once, in the manifest, with the SHA-256 of its release asset, and
+ * everything that needs one reads it from there: the workflows, local checks and the agent environment.
+ *
+ *   node scripts/tools.mjs install actionlint zizmor   # download, check the SHA-256, unpack onto PATH
+ *   node scripts/tools.mjs install --local             # every tool this checkout's modules need locally
+ *   node scripts/tools.mjs version uv                  # print a pinned version
+ *   node scripts/tools.mjs run govulncheck -- ./...    # run a tool the manifest runs by version
+ *   node scripts/tools.mjs check golangci-lint         # is the one on PATH the pinned one?
+ *   node scripts/tools.mjs bump trivy [X.Y.Z]          # move a pin; the checksum comes from the release
+ *
+ * `install` writes into --dir, or into $RUNNER_TEMP/tools in GitHub Actions (added to $GITHUB_PATH), or
+ * into .tools/bin here. It checks the SHA-256 before unpacking anything, so a replaced asset fails.
+ *
+ * Written for older Node versions than the one .node-version pins, because the agent environment may
+ * run it to install that Node. Exit 0 done · 1 a check found a mismatch · 2 could not run.
+ */
+import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
+import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync, appendFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { basename, dirname, join, resolve } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
+
+const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+export const TOOLS_FILE = join(ROOT, "scripts", "tools", "tools.json");
+/** Where a tool may be needed: everywhere, where a module of a toolchain is present, or only in CI. */
+export const PLACES = ["chassis", "go", "node", "python", "ci"];
+
+export class ToolError extends Error {}
+
+export function loadTools(file = TOOLS_FILE) {
+  return JSON.parse(readFileSync(file, "utf8")).tools;
+}
+
+/** Every way the manifest is malformed, or an empty list. */
+export function validateTools(tools) {
+  const problems = [];
+  for (const [name, tool] of Object.entries(tools)) {
+    const say = (message) => problems.push(`${name}: ${message}`);
+    if (!/^\d+\.\d+\.\d+$/.test(tool.version ?? "")) say("`version` must be X.Y.Z");
+    if (!PLACES.includes(tool.for)) say(`\`for\` must be one of ${PLACES.join(", ")}`);
+    const sources = ["github", "githubTags", "pypi"].filter((key) => key in (tool.releases ?? {}));
+    if (sources.length !== 1) say("`releases` must name one of github, githubTags, pypi");
+    if (("platforms" in tool) === ("run" in tool)) say("a tool is either downloaded (`platforms`) or run by version (`run`)");
+    for (const [platform, asset] of Object.entries(tool.platforms ?? {})) {
+      if (!/^https:\/\//.test(asset.url ?? "")) say(`${platform}: \`url\` must be https`);
+      if (!/^[0-9a-f]{64}$/.test(asset.sha256 ?? "")) say(`${platform}: \`sha256\` must be 64 hex characters`);
+      if (!Array.isArray(asset.files) || asset.files.length === 0) say(`${platform}: \`files\` lists what to unpack`);
+    }
+    if ("platforms" in tool && !["file", "sidecar", "githubDigest"].some((key) => key in (tool.checksums ?? {}))) {
+      say("`checksums` must say where the release publishes its checksum: file, sidecar or githubDigest");
+    }
+  }
+  return problems;
+}
+
+const fill = (template, tool) => template.replaceAll("{version}", tool.version);
+
+export function platform() {
+  const arch = { x64: "x64", arm64: "arm64" }[process.arch] ?? process.arch;
+  return `${process.platform}-${arch}`;
+}
+
+function need(tools, name) {
+  if (!(name in tools)) throw new ToolError(`no tool named ${name} in scripts/tools/tools.json. Known: ${Object.keys(tools).join(", ")}.`);
+  return tools[name];
+}
+
+const sha256 = (bytes) => createHash("sha256").update(bytes).digest("hex");
+
+/**
+ * Downloads a tool's asset for this platform, refuses it unless its SHA-256 is the pinned one, and
+ * copies the listed files into `dir`. Returns the paths written.
+ */
+export async function install(name, { tools = loadTools(), dir, fetch = globalThis.fetch } = {}) {
+  const tool = need(tools, name);
+  if (!tool.platforms) throw new ToolError(`${name} is run by version, not installed; use \`node scripts/tools.mjs run ${name}\`.`);
+  const asset = tool.platforms[platform()];
+  if (!asset) throw new ToolError(`${name} has no pinned asset for ${platform()}; add one to scripts/tools/tools.json.`);
+  const url = fill(asset.url, tool);
+  const response = await fetch(url);
+  if (!response.ok) throw new ToolError(`${name}: ${url} answered ${response.status}`);
+  const bytes = Buffer.from(await response.arrayBuffer());
+  const actual = sha256(bytes);
+  if (actual !== asset.sha256) {
+    throw new ToolError(`${name}: ${url} has SHA-256 ${actual}, not the pinned ${asset.sha256}. The asset was replaced, or the pin is wrong: nothing was unpacked.`);
+  }
+  const work = mkdtempSync(join(tmpdir(), `tool-${name}-`));
+  try {
+    const archive = join(work, basename(new URL(url).pathname));
+    writeFileSync(archive, bytes);
+    const unpacked = spawnSync("tar", ["-xzf", archive, "-C", work], { encoding: "utf8" });
+    if (unpacked.status !== 0) throw new ToolError(`${name}: could not unpack ${basename(archive)}: ${unpacked.stderr || unpacked.error}`);
+    mkdirSync(dir, { recursive: true });
+    return asset.files.map((member) => {
+      const from = join(work, fill(member, tool));
+      if (!existsSync(from)) throw new ToolError(`${name}: ${fill(member, tool)} is not in ${basename(archive)}`);
+      const to = join(dir, basename(from));
+      copyFileSync(from, to);
+      chmodSync(to, 0o755);
+      return to;
+    });
+  } finally {
+    rmSync(work, { recursive: true, force: true });
+  }
+}
+
+/** The command that runs a tool the manifest runs by version, with `args` after it. */
+export function command(name, args = [], tools = loadTools()) {
+  const tool = need(tools, name);
+  if (!tool.run) throw new ToolError(`${name} is installed, not run by version; use \`node scripts/tools.mjs install ${name}\`.`);
+  return [...tool.run.map((part) => fill(part, tool)), ...args];
+}
+
+/** The version a tool on PATH reports, or null when it is not on PATH. Reads the first X.Y.Z it prints. */
+export function installedVersion(name, tools = loadTools()) {
+  const tool = need(tools, name);
+  if (!tool.versionCommand) return null;
+  const [cmd, ...args] = tool.versionCommand;
+  const out = spawnSync(cmd, args, { encoding: "utf8" });
+  if (out.error || out.status !== 0) return null;
+  return /(\d+\.\d+\.\d+)/.exec(`${out.stdout}${out.stderr}`)?.[1] ?? null;
+}
+
+/** The tools a checkout needs locally: the chassis's, and those of every toolchain a module here uses. */
+export function localTools(toolchains, tools = loadTools()) {
+  return Object.entries(tools)
+    .filter(([, tool]) => tool.platforms && (tool.for === "chassis" || toolchains.includes(tool.for)))
+    .map(([name]) => name);
+}
+
+const STABLE = /^v?\d+\.\d+\.\d+$/;
+export function compareVersions(a, b) {
+  const [x, y] = [a, b].map((v) => v.replace(/^v/, "").split(".").map(Number));
+  for (let i = 0; i < 3; i++) if (x[i] !== y[i]) return x[i] - y[i];
+  return 0;
+}
+
+/** The newest stable version of a tool, from where its manifest entry says it is released. */
+export async function latest(name, { tools = loadTools(), fetch = globalThis.fetch, token } = {}) {
+  const tool = need(tools, name);
+  const github = async (path) => {
+    const response = await fetch(`https://api.github.com/repos/${path}`, {
+      headers: { accept: "application/vnd.github+json", ...(token ? { authorization: `Bearer ${token}` } : {}) },
+    });
+    if (!response.ok) throw new ToolError(`${path} answered ${response.status}`);
+    return response.json();
+  };
+  const { releases } = tool;
+  if (releases.github) return (await github(`${releases.github}/releases/latest`)).tag_name.replace(/^v/, "");
+  if (releases.githubTags) {
+    const tags = (await github(`${releases.githubTags}/tags?per_page=100`)).map((t) => t.name).filter((n) => STABLE.test(n));
+    if (tags.length === 0) throw new ToolError(`${releases.githubTags} has no stable tag`);
+    return tags.sort(compareVersions).at(-1).replace(/^v/, "");
+  }
+  const response = await fetch(`https://pypi.org/pypi/${releases.pypi}/json`);
+  if (!response.ok) throw new ToolError(`PyPI ${releases.pypi} answered ${response.status}`);
+  return (await response.json()).info.version;
+}
+
+/** The SHA-256 a release publishes for one asset, from where the manifest says the release publishes it. */
+async function publishedChecksum(tool, asset, { fetch, token }) {
+  const url = fill(asset.url, tool);
+  const file = basename(new URL(url).pathname);
+  const text = async (address) => {
+    const response = await fetch(address);
+    if (!response.ok) throw new ToolError(`${address} answered ${response.status}`);
+    return response.text();
+  };
+  if (tool.checksums.file) {
+    const line = (await text(fill(tool.checksums.file, tool))).split(/\r?\n/).find((l) => l.trim().endsWith(` ${file}`) || l.trim().endsWith(`*${file}`));
+    if (!line) throw new ToolError(`the release's checksums file does not list ${file}`);
+    return line.trim().split(/\s+/)[0];
+  }
+  if (tool.checksums.sidecar) return (await text(fill(tool.checksums.sidecar, tool))).trim().split(/\s+/)[0];
+  const tag = fill(tool.releases.tag ?? "v{version}", tool);
+  const response = await fetch(`https://api.github.com/repos/${tool.releases.github}/releases/tags/${tag}`, {
+    headers: { accept: "application/vnd.github+json", ...(token ? { authorization: `Bearer ${token}` } : {}) },
+  });
+  if (!response.ok) throw new ToolError(`release ${tag} of ${tool.releases.github} answered ${response.status}`);
+  const digest = (await response.json()).assets?.find((a) => a.name === file)?.digest;
+  if (!/^sha256:[0-9a-f]{64}$/.test(digest ?? "")) throw new ToolError(`GitHub records no SHA-256 for ${file} in ${tag}`);
+  return digest.slice("sha256:".length);
+}
+
+/**
+ * Moves a pin: sets the version (the latest release when none is given) and, for every downloaded
+ * asset, the SHA-256 the release itself publishes. Returns the manifest with the change made.
+ */
+export async function bump(name, version, { tools = loadTools(), fetch = globalThis.fetch, token } = {}) {
+  const current = need(tools, name);
+  const target = version ?? (await latest(name, { tools, fetch, token }));
+  if (!/^\d+\.\d+\.\d+$/.test(target)) throw new ToolError(`${target} is not a version X.Y.Z`);
+  const next = { ...current, version: target };
+  if (next.platforms) {
+    next.platforms = Object.fromEntries(
+      await Promise.all(Object.entries(current.platforms).map(async ([key, asset]) => [key, { ...asset, sha256: await publishedChecksum(next, asset, { fetch, token }) }])),
+    );
+  }
+  return { ...tools, [name]: next };
+}
+
+function defaultDir() {
+  if (process.env.GITHUB_ACTIONS === "true" && process.env.RUNNER_TEMP) return join(process.env.RUNNER_TEMP, "tools");
+  return join(ROOT, ".tools", "bin");
+}
+
+async function main(argv) {
+  const [verb, ...rest] = argv;
+  const tools = loadTools();
+  const problems = validateTools(tools);
+  if (problems.length > 0) throw new ToolError(`scripts/tools/tools.json is malformed:\n  ${problems.join("\n  ")}`);
+  if (verb === "install") {
+    const dirAt = rest.indexOf("--dir");
+    const dir = dirAt === -1 ? defaultDir() : resolve(rest[dirAt + 1]);
+    let names = rest.filter((arg, i) => !arg.startsWith("--") && (dirAt === -1 || i !== dirAt + 1));
+    if (rest.includes("--local")) {
+      const { presentModules } = await import("./modules.mjs");
+      names = [...names, ...localTools([...new Set(presentModules().map((m) => m.toolchain))], tools)];
+    }
+    if (names.length === 0) throw new ToolError("name a tool to install, or pass --local");
+    for (const name of names) {
+      for (const path of await install(name, { tools, dir })) console.log(`tools: installed ${name} ${tools[name].version} at ${path}`);
+    }
+    if (process.env.GITHUB_PATH) appendFileSync(process.env.GITHUB_PATH, `${dir}\n`);
+    return 0;
+  }
+  if (verb === "version") {
+    console.log(need(tools, rest[0]).version);
+    return 0;
+  }
+  if (verb === "run") {
+    const [name, ...args] = rest;
+    const [cmd, ...cmdArgs] = command(name, args[0] === "--" ? args.slice(1) : args, tools);
+    const out = spawnSync(cmd, cmdArgs, { stdio: "inherit", shell: process.platform === "win32" });
+    return out.status ?? 2;
+  }
+  if (verb === "check") {
+    let code = 0;
+    for (const name of rest) {
+      const found = installedVersion(name, tools);
+      if (found === tools[name].version) console.log(`tools: ${name} ${found}, as pinned`);
+      else {
+        console.error(`tools: ${name} is ${found ?? "not on PATH"}, but scripts/tools/tools.json pins ${tools[name].version}. Run: node scripts/tools.mjs install ${name}`);
+        code = 1;
+      }
+    }
+    return code;
+  }
+  if (verb === "bump") {
+    const [name, version] = rest;
+    const next = await bump(name, version, { tools, token: process.env.GH_TOKEN });
+    const manifest = JSON.parse(readFileSync(TOOLS_FILE, "utf8"));
+    writeFileSync(TOOLS_FILE, `${JSON.stringify({ ...manifest, tools: next }, null, 2)}\n`);
+    console.log(`tools: ${name} ${tools[name].version} → ${next[name].version}. Read its release notes, then run node scripts/verify.mjs.`);
+    return 0;
+  }
+  throw new ToolError(`unknown command "${verb ?? ""}": use install, version, run, check or bump`);
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main(process.argv.slice(2)).then(
+    (code) => {
+      process.exitCode = code;
+    },
+    (err) => {
+      console.error(`tools: ${err instanceof ToolError ? err.message : err.stack}`);
+      process.exitCode = 2;
+    },
+  );
+}

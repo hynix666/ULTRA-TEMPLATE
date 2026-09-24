@@ -36,6 +36,10 @@
  *  15. A download in a workflow or local action that keeps a file is verified against a checksum in
  *      the same step, and no download is piped into an interpreter, which runs it before anything
  *      could check it.
+ *  16. No workflow or local action writes a version of its own: a tool version (`X_VERSION:`, `@vX.Y.Z`,
+ *      `==X.Y.Z`, a release download, `version: vX`) belongs in scripts/tools/tools.json, and a toolchain
+ *      version (`node-version: 24`) in the file its setup action reads. A pin written anywhere else is
+ *      one the pin report and the installer cannot see.
  *
  *   node scripts/check-hygiene.mjs
  *
@@ -263,6 +267,29 @@ function downloader(stage) {
   return at !== -1 && stage.slice(0, at).every((word) => PREFIX.test(word)) ? at : -1;
 }
 
+// Lines shaped like a version written by hand. `uses:` lines are rule 8's, and are skipped.
+const PIN_SHAPED = [
+  [/^\s*[A-Z][A-Z0-9_]*_VERSION:\s*["']?v?\d/, "a tool version in an environment variable"],
+  [/@v\d+\.\d+\.\d+/, "a tool run at a version"],
+  [/==\d+\.\d+\.\d+/, "a package pinned to a version"],
+  [/\/releases\/download\/v?\d/, "a release downloaded by version"],
+  [/^\s+version:\s*["']?v?\d/, "a version input"],
+  [/^\s+(?:node|go|python|java|ruby|dotnet)-version:\s*["']?\d/, "a toolchain version"],
+];
+
+/** Rule 16, for one workflow or action file. */
+export function checkPins(path, text) {
+  const problems = [];
+  text.split(/\r?\n/).forEach((line, i) => {
+    if (/^\s*#/.test(line) || /^\s*-?\s*uses:/.test(line)) return;
+    const found = PIN_SHAPED.find(([shape]) => shape.test(line));
+    if (found) {
+      problems.push(`${path}:${i + 1} writes ${found[1]} (\`${line.trim()}\`). Pin a tool in scripts/tools/tools.json and read it with scripts/tools.mjs; read a toolchain version from its file (node-version-file, go-version-file).`);
+    }
+  });
+  return problems;
+}
+
 /** Rule 15, for one workflow or action file. A step is the YAML list item a line sits in. */
 export function checkDownloads(path, text) {
   const lines = text.split(/\r?\n/);
@@ -454,7 +481,9 @@ export function checkRepoHygiene(root = process.cwd()) {
     if (leftovers.length > 0) failures.push(`template marker line(s) survived initialization: ${leftovers.join(", ")}.`);
   }
 
-  for (const path of present.filter((p) => WORKFLOW.test(p))) failures.push(...checkDownloads(path, read(path)), ...checkWorkflow(path, read(path)));
+  for (const path of present.filter((p) => WORKFLOW.test(p))) {
+    failures.push(...checkDownloads(path, read(path)), ...checkPins(path, read(path)), ...checkWorkflow(path, read(path)));
+  }
   for (const path of present.filter((p) => /(^|\/)Dockerfile$/.test(p))) failures.push(...checkDigests(path, read(path)), ...checkInstalls(path, read(path)));
   failures.push(...checkModules(tracked, read));
 

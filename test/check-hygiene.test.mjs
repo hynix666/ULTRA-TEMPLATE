@@ -11,6 +11,7 @@ import {
   checkDownloads,
   checkGate,
   checkModules,
+  checkPins,
   checkRepoHygiene,
   checkWorkflow,
   jobIds,
@@ -325,3 +326,31 @@ test("a directory that is not a git repository is fatal", (t) => {
   writeFileSync(join(root, ".gitignore"), IGNORE);
   assert.match(checkRepoHygiene(root).fatal ?? "", /git repository/);
 });
+
+test("rule 16: a version written into a workflow fails; one read from the manifest or a file does not", () => {
+  const workflow = [
+    "env:",
+    '  SHELLCHECK_VERSION: "0.10.0"',
+    "  # TOOL_VERSION: \"1.0.0\" in a comment is not a pin",
+    "steps:",
+    "  - uses: actions/setup-node@0000000000000000000000000000000000000000 # v7.0.0",
+    "    with:",
+    "      node-version: 24",
+    "  - run: go run example.com/tool@v1.2.3 ./...",
+    "  - run: uvx tool==4.5.6",
+    "  - run: curl -o x https://github.com/o/r/releases/download/v1.0.0/x.tgz",
+    "  - uses: golangci/golangci-lint-action@0000000000000000000000000000000000000000 # v9.3.0",
+    "    with:",
+    "      version: v2.13.2",
+    "  - run: node scripts/tools.mjs install actionlint",
+    "  - uses: astral-sh/setup-uv@0000000000000000000000000000000000000000 # v10.1.0",
+    "    with:",
+    "      version: ${{ steps.uv.outputs.version }}",
+    "      node-version-file: .node-version",
+  ].join("\n");
+  const found = checkPins("ci.yml", workflow);
+  assert.deepEqual(found.map((f) => f.split(" ")[0]), ["ci.yml:2", "ci.yml:7", "ci.yml:8", "ci.yml:9", "ci.yml:10", "ci.yml:13"]);
+  assert.match(found[0], /a tool version in an environment variable/);
+  assert.match(found[1], /a toolchain version/);
+});
+

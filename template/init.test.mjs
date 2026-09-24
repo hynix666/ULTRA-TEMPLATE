@@ -167,10 +167,12 @@ test("a path may belong to several features, but not to one inside another's or 
   assert.deepEqual(validateManifest(manifest({ a: { paths: ["svc"] }, b: { paths: ["svc2"] } }), exists), []);
 });
 
-test("template-test generates exactly the presets features.json defines", () => {
+test("template-test generates every preset features.json defines, from features.json itself", () => {
+  // A list of presets written into the workflow is one a new preset would be missing from.
   const workflow = readFileSync(join(ROOT, ".github/workflows/template-test.yml"), "utf8");
-  const matrix = /^\s*preset: \[([^\]]*)\]/m.exec(workflow)?.[1].split(",").map((p) => p.trim());
-  assert.deepEqual(matrix, Object.keys(loadManifest().presets));
+  assert.doesNotMatch(workflow, /^\s*preset: \[/m, "the matrix lists presets of its own");
+  assert.match(workflow, /preset: \$\{\{ fromJSON\(needs\.presets\.outputs\.presets\) \}\}/);
+  assert.match(workflow, /Object\.keys\(require\("\.\/template\/features\.json"\)\.presets\)/);
 });
 
 test("the 1.x public contract only grows: no feature or preset is removed or renamed", () => {

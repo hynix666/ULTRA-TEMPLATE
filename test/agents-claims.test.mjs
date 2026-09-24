@@ -10,7 +10,7 @@ import { auditLedger, claims, hygieneRules } from "./claims.mjs";
 // Only chassis files are cited: every project keeps them, whichever features it has.
 const LEDGER = {
   "One required check.": { rules: [9], paths: [".github/workflows/verify.yml", "scripts/configure-github.mjs"] },
-  "Pinned supply chain.": { rules: [8, 14, 15], paths: [".github/workflows/pins.yml", "scripts/check-pins.mjs"] },
+  "Pinned supply chain.": { rules: [8, 14, 15, 16], paths: ["scripts/tools/tools.json", "scripts/tools.mjs", ".github/workflows/pins.yml", "scripts/check-pins.mjs"] },
   "Least privilege in workflows.": { rules: [8], paths: [".github/zizmor.yml"] },
   "Repository shape.": { rules: [1, 2, 3, 4, 5, 6, 10, 11, 12] },
   "Independent modules.": { rules: [13], paths: ["scripts/modules.mjs"] },
@@ -37,6 +37,8 @@ test("the audit fails on a claim with nothing behind it and on a citation that w
   assert.match(auditLedger(["A"], { A: {} }, { rules }).join(), /cites neither a rule nor a path/);
 });
 
-test("the rule numbers are read from check-hygiene's header, all fifteen of them", () => {
-  assert.deepEqual(hygieneRules(), Array.from({ length: 15 }, (_, i) => i + 1));
+test("check-hygiene's header numbers its rules 1 to N with none missing or repeated", () => {
+  const rules = hygieneRules();
+  assert.ok(rules.length > 0, "no numbered rule in check-hygiene's header");
+  assert.deepEqual(rules, Array.from({ length: rules.length }, (_, i) => i + 1));
 });

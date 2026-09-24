@@ -8,9 +8,9 @@
  * deleting the directory removes it from setup, verify and CI with nothing else to edit (ADR-0014).
  */
 import { spawnSync } from "node:child_process";
-import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { appendFileSync, existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join, relative, resolve, sep } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 export const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 export const MANIFEST = "module.json";
@@ -202,4 +202,41 @@ export function nodeVersionProblem(pinned, running = process.versions.node) {
 export function checkNodeVersion(root = ROOT) {
   const file = join(root, ".node-version");
   return existsSync(file) ? nodeVersionProblem(readFileSync(file, "utf8")) : null;
+}
+
+/**
+ * What the modules present need from a machine, as `key=value` lines: each toolchain in use, and for Go
+ * the go.mod that names its version, which setup-go reads. Workflows read this instead of restating
+ * which feature needs which toolchain. With module ids, only those modules and what they need.
+ */
+export function toolchainNeeds(modules) {
+  const used = new Set(modules.map((m) => m.toolchain));
+  const lines = Object.keys(TOOLCHAINS).map((name) => `${name}=${used.has(name)}`);
+  const go = modules.find((m) => m.toolchain === "go");
+  if (go) lines.push(`go-version-file=${go.dir}/${TOOLCHAINS.go.manifest}`);
+  return lines;
+}
+
+function main(argv) {
+  const [verb, ...rest] = argv;
+  const github = rest.includes("--github-output");
+  const ids = rest.filter((arg) => !arg.startsWith("--"));
+  const modules = presentModules().filter((m) => ids.length === 0 || ids.includes(m.id));
+  const missing = ids.filter((id) => !modules.some((m) => m.id === id));
+  if (missing.length > 0) throw new ModuleError(`no module named ${missing.join(", ")} here`);
+  let lines;
+  if (verb === "list") lines = modules.map((m) => `${m.id}\t${m.dir}\t${m.toolchain}`);
+  else if (verb === "toolchains") lines = toolchainNeeds(modules);
+  else throw new ModuleError(`unknown command "${verb ?? ""}": use list or toolchains`);
+  if (github && process.env.GITHUB_OUTPUT) appendFileSync(process.env.GITHUB_OUTPUT, `${lines.join("\n")}\n`);
+  console.log(lines.join("\n"));
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  try {
+    main(process.argv.slice(2));
+  } catch (err) {
+    console.error(`modules: ${err instanceof ModuleError ? err.message : err.stack}`);
+    process.exitCode = 2;
+  }
 }

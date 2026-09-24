@@ -1,0 +1,113 @@
+{
+  "$comment": "Every tool this repository runs at a version it pins by hand, because Dependabot cannot see it: one place for the version, the release it comes from and, for a downloaded binary, the SHA-256 taken from that release. scripts/tools.mjs installs, runs and bumps them from here, the workflows and the agent environment read them from here, and check-hygiene rule 16 fails on a pin written anywhere else. `for` says where a tool is needed: `chassis` everywhere, a toolchain name wherever a module of that toolchain is present, and `ci` only in CI. docs/toolchain-updates.md says how to move one.",
+  "tools": {
+    "actionlint": {
+      "version": "1.7.12",
+      "for": "chassis",
+      "releases": { "github": "rhysd/actionlint" },
+      "platforms": {
+        "linux-x64": {
+          "url": "https://github.com/rhysd/actionlint/releases/download/v{version}/actionlint_{version}_linux_amd64.tar.gz",
+          "sha256": "8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8",
+          "files": ["actionlint"]
+        }
+      },
+      "checksums": { "file": "https://github.com/rhysd/actionlint/releases/download/v{version}/actionlint_{version}_checksums.txt" },
+      "versionCommand": ["actionlint", "-version"]
+    },
+    "zizmor": {
+      "version": "1.30.1",
+      "for": "chassis",
+      "releases": { "github": "zizmorcore/zizmor" },
+      "platforms": {
+        "linux-x64": {
+          "url": "https://github.com/zizmorcore/zizmor/releases/download/v{version}/zizmor-x86_64-unknown-linux-gnu.tar.gz",
+          "sha256": "e65324f4430c2717591937edcec90ccbefaf14c174f8ec9415e03ca875b46e1a",
+          "files": ["zizmor"]
+        }
+      },
+      "checksums": { "githubDigest": true },
+      "versionCommand": ["zizmor", "--version"]
+    },
+    "golangci-lint": {
+      "version": "2.13.2",
+      "for": "go",
+      "releases": { "github": "golangci/golangci-lint" },
+      "platforms": {
+        "linux-x64": {
+          "url": "https://github.com/golangci/golangci-lint/releases/download/v{version}/golangci-lint-{version}-linux-amd64.tar.gz",
+          "sha256": "2277d43b98ec0054280f2ac26b53268bae97682444678a59a657dd565da021d6",
+          "files": ["golangci-lint-{version}-linux-amd64/golangci-lint"]
+        }
+      },
+      "checksums": { "file": "https://github.com/golangci/golangci-lint/releases/download/v{version}/golangci-lint-{version}-checksums.txt" },
+      "versionCommand": ["golangci-lint", "--version"]
+    },
+    "uv": {
+      "version": "0.12.18",
+      "for": "python",
+      "releases": { "github": "astral-sh/uv", "tag": "{version}" },
+      "platforms": {
+        "linux-x64": {
+          "url": "https://github.com/astral-sh/uv/releases/download/{version}/uv-x86_64-unknown-linux-gnu.tar.gz",
+          "sha256": "89eadd7c76fc063887959510d5ba0ab1264dfd5f1143b925ddb73021a40acf16",
+          "files": ["uv-x86_64-unknown-linux-gnu/uv", "uv-x86_64-unknown-linux-gnu/uvx"]
+        }
+      },
+      "checksums": { "sidecar": "https://github.com/astral-sh/uv/releases/download/{version}/uv-x86_64-unknown-linux-gnu.tar.gz.sha256" },
+      "versionCommand": ["uv", "--version"]
+    },
+    "gitleaks": {
+      "version": "8.30.1",
+      "for": "ci",
+      "releases": { "github": "gitleaks/gitleaks" },
+      "platforms": {
+        "linux-x64": {
+          "url": "https://github.com/gitleaks/gitleaks/releases/download/v{version}/gitleaks_{version}_linux_x64.tar.gz",
+          "sha256": "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb",
+          "files": ["gitleaks"]
+        }
+      },
+      "checksums": { "file": "https://github.com/gitleaks/gitleaks/releases/download/v{version}/gitleaks_{version}_checksums.txt" }
+    },
+    "trivy": {
+      "version": "0.74.0",
+      "for": "ci",
+      "releases": { "github": "aquasecurity/trivy" },
+      "platforms": {
+        "linux-x64": {
+          "url": "https://github.com/aquasecurity/trivy/releases/download/v{version}/trivy_{version}_Linux-64bit.tar.gz",
+          "sha256": "2ae6fe3ee734b7fdf11335663e18c75ea12dccc76062f09f164a3b0f8be4371a",
+          "files": ["trivy"]
+        }
+      },
+      "checksums": { "file": "https://github.com/aquasecurity/trivy/releases/download/v{version}/trivy_{version}_checksums.txt" }
+    },
+    "mcp-publisher": {
+      "version": "1.8.1",
+      "for": "ci",
+      "releases": { "github": "modelcontextprotocol/registry" },
+      "platforms": {
+        "linux-x64": {
+          "url": "https://github.com/modelcontextprotocol/registry/releases/download/v{version}/mcp-publisher_linux_amd64.tar.gz",
+          "sha256": "a06c9096dcb9727c13555b6be26c7effa707b01f06a4c561ba7a3635443cf2cc",
+          "files": ["mcp-publisher"]
+        }
+      },
+      "checksums": { "githubDigest": true }
+    },
+    "govulncheck": {
+      "version": "1.8.0",
+      "for": "ci",
+      "releases": { "githubTags": "golang/vuln" },
+      "run": ["go", "run", "golang.org/x/vuln/cmd/govulncheck@v{version}"],
+      "$why": "Run through the Go module proxy, which checks it against the Go checksum database, so no SHA-256 is written here."
+    },
+    "pip-audit": {
+      "version": "2.10.1",
+      "for": "ci",
+      "releases": { "pypi": "pip-audit" },
+      "run": ["uvx", "pip-audit=={version}"]
+    }
+  }
+}

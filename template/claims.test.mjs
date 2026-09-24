@@ -11,8 +11,8 @@ import { auditLedger, claims } from "../test/claims.mjs";
 const LEDGER = {
   "One gate.": { rules: [9], paths: ["scripts/verify.mjs", ".github/workflows/verify.yml"] },
   "A pinned supply chain the build enforces.": {
-    rules: [8, 14, 15],
-    paths: ["scripts/check-pins.mjs", ".github/workflows/pins.yml", ".github/workflows/mcp-publish.yml"],
+    rules: [8, 14, 15, 16],
+    paths: ["scripts/tools/tools.json", "scripts/tools.mjs", "scripts/check-pins.mjs", ".github/workflows/pins.yml", ".github/workflows/mcp-publish.yml"],
   },
   "Repository hygiene checks.": { rules: [1, 2, 3, 4, 5, 6, 7, 9, 10, 11, 12, 13] },
   "Clean Architecture services whose layer rules are tests": {
