@@ -31,7 +31,7 @@ const (
 func Serve(ctx context.Context, listener net.Listener, shutdownTimeout time.Duration, log *slog.Logger) error {
 	tasks := usecase.NewTasks(memory.NewTaskRepository(), time.Now, rand.Text)
 	server := &http.Server{
-		Handler:           httpapi.NewRouter(tasks, log),
+		Handler:           httpapi.WithRequestLog(httpapi.NewRouter(tasks, log), log, time.Now, rand.Text),
 		ReadHeaderTimeout: readHeaderTimeout,
 		ReadTimeout:       readTimeout,
 		WriteTimeout:      writeTimeout,

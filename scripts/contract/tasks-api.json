@@ -1,9 +1,12 @@
 {
-  "$comment": "The task API contract every task service answers identically, checked over HTTP by scripts/check-contract.mjs. `{id}` is replaced by a task created for that case, in the todo status. A case lists the status and, where it is part of the contract, the shape of the answer. A case may list `setup` requests, sent first and judged on their status alone, to bring its task to the state the case is about; every one of the nine pairs of statuses is below, the three legal moves and the six refusals, as scripts/rules/task-rules.json states them. Paths that are not canonical (`//api/tasks`, `/api/../api/tasks`) are left out on purpose: each language's standard server cleans or rejects them before the service sees the request.",
+  "$comment": "The task API contract every task service answers identically, checked over HTTP by scripts/check-contract.mjs. `{id}` is replaced by a task created for that case, in the todo status. A case lists the status and, where it is part of the contract, the shape of the answer. A case may list `setup` requests, sent first and judged on their status alone, to bring its task to the state the case is about; every one of the nine pairs of statuses is below, the three legal moves and the six refusals, as scripts/rules/task-rules.json states them. Every answer carries an X-Request-Id: a usable one sent (`requestId: echo`) is echoed and an unsafe one replaced (`requestId: replaced`), and every answered request is logged once to stdout as one JSON line; `beforeService` marks the one case a language's own HTTP server may answer before the service sees it. Paths that are not canonical (`//api/tasks`, `/api/../api/tasks`) are left out on purpose: each language's standard server cleans or rejects them before the service sees the request.",
   "cases": [
     { "name": "health", "method": "GET", "path": "/healthz", "status": 200, "json": { "status": "ok" } },
     { "name": "health answers HEAD like GET", "method": "HEAD", "path": "/healthz", "status": 200 },
     { "name": "health refuses other methods", "method": "POST", "path": "/healthz", "status": 405, "error": true },
+    { "name": "a usable request id is echoed", "method": "GET", "path": "/healthz", "headers": { "X-Request-Id": "contract.echo-1_A" }, "requestId": "echo", "status": 200 },
+    { "name": "a request id with a space is replaced", "method": "GET", "path": "/healthz", "headers": { "X-Request-Id": "has space" }, "requestId": "replaced", "status": 200 },
+    { "name": "a request id over 128 characters is replaced", "method": "GET", "path": "/healthz", "headers": { "X-Request-Id": { "repeat": "a", "times": 129 } }, "requestId": "replaced", "status": 200 },
 
     { "name": "list", "method": "GET", "path": "/api/tasks", "status": 200, "array": true },
     { "name": "list answers HEAD like GET", "method": "HEAD", "path": "/api/tasks", "status": 200 },
@@ -30,7 +33,7 @@
     { "name": "get", "method": "GET", "path": "/api/tasks/{id}", "status": 200, "task": { "status": "todo" } },
     { "name": "get answers HEAD like GET", "method": "HEAD", "path": "/api/tasks/{id}", "status": 200 },
     { "name": "get an unknown task", "method": "GET", "path": "/api/tasks/no-such-task", "status": 404, "error": true },
-    { "name": "get refuses a malformed escape", "method": "GET", "path": "/api/tasks/%zz", "status": 400 },
+    { "name": "get refuses a malformed escape", "method": "GET", "path": "/api/tasks/%zz", "status": 400, "beforeService": true },
     { "name": "a trailing slash is another path", "method": "GET", "path": "/api/tasks/", "status": 404, "error": true },
     { "name": "an unknown path", "method": "GET", "path": "/api", "status": 404, "error": true },
     { "name": "a path below a task", "method": "GET", "path": "/api/tasks/{id}/status/more", "status": 404, "error": true },

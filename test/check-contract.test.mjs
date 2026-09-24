@@ -3,7 +3,7 @@
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import { test } from "node:test";
-import { checkSpec, encodeBody, judge, loadCases, loadSpec, runCases } from "../scripts/check-contract.mjs";
+import { checkLogs, checkSpec, encodeBody, judge, loadCases, loadSpec, runCases } from "../scripts/check-contract.mjs";
 import { loadRules } from "../scripts/rules/load.mjs";
 
 // The moves the fake service allows unless `mistakes.moves` says otherwise.
@@ -12,12 +12,17 @@ const MOVES = { todo: ["in_progress"], in_progress: ["todo", "done"], done: [] }
 /** A minimal task service that is right about everything except what `mistakes` says. */
 function fakeService(t, mistakes = {}) {
   const tasks = new Map();
+  let generated = 0;
   const server = createServer((req, res) => {
     let raw = "";
     req.on("data", (chunk) => (raw += chunk));
     req.on("end", () => {
+      const sent = req.headers["x-request-id"];
+      const id = mistakes.alwaysGenerate || typeof sent !== "string" || !/^[A-Za-z0-9._-]{1,128}$/.test(sent) ? `gen-${++generated}` : sent;
       const send = (status, body) => {
-        res.writeHead(status, { "content-type": mistakes.textErrors && status >= 400 ? "text/plain" : "application/json" });
+        const headers = { "content-type": mistakes.textErrors && status >= 400 ? "text/plain" : "application/json" };
+        if (!mistakes.noRequestId) headers["x-request-id"] = id;
+        res.writeHead(status, headers);
         res.end(mistakes.textErrors && status >= 400 ? "nope" : JSON.stringify(body));
       };
       if (req.url === "/healthz") return send(200, { status: "ok" });
@@ -74,6 +79,48 @@ test("the right status with an error that is not JSON still fails", async (t) =>
 
 const moveTo = (status) => ({ method: "PATCH", path: "/api/tasks/{id}/status", body: JSON.stringify({ status }), status: 200 });
 
+test("every answer carries a request id, and a usable one sent is echoed while an unsafe one is replaced", async (t) => {
+  const cases = [
+    { name: "health", method: "GET", path: "/healthz", status: 200 },
+    { name: "echo", method: "GET", path: "/healthz", headers: { "X-Request-Id": "contract.echo-1" }, requestId: "echo", status: 200 },
+    { name: "replace", method: "GET", path: "/healthz", headers: { "X-Request-Id": "has space" }, requestId: "replaced", status: 200 },
+  ];
+  assert.deepEqual(await runCases(await fakeService(t), cases), []);
+
+  const missing = await runCases(await fakeService(t, { noRequestId: true }), cases);
+  assert.deepEqual(missing.map((f) => f.name), ["health", "echo", "replace"]);
+  assert.match(missing[0].problems.join(), /no usable X-Request-Id header/);
+
+  const ignored = await runCases(await fakeService(t, { alwaysGenerate: true }), cases);
+  assert.deepEqual(ignored.map((f) => f.name), ["echo"]);
+  assert.match(ignored[0].problems.join(), /X-Request-Id "gen-2", expected the "contract.echo-1" that was sent/);
+
+  // A case the language's own server may answer before the service sees it needs no id.
+  const early = [{ name: "early", method: "GET", path: "/healthz", status: 200, beforeService: true }];
+  assert.deepEqual(await runCases(await fakeService(t, { noRequestId: true }), early), []);
+});
+
+test("every request with an id is logged once, as it was answered", () => {
+  const exchanges = [
+    { requestId: "a", method: "GET", path: "/healthz", status: 200 },
+    { requestId: "b", method: "PATCH", path: "/api/tasks/t1/status", status: 409 },
+  ];
+  const line = (entry) => JSON.stringify({ time: "2026-01-02T03:04:05Z", level: "info", msg: "request", durationMs: 0.4, ...entry });
+  const good = [
+    '{"level":"info","msg":"listening"}',
+    line({ method: "GET", path: "/healthz", status: 200, requestId: "a" }),
+    line({ method: "PATCH", path: "/api/tasks/t1/status", status: 409, requestId: "b" }),
+  ];
+  assert.deepEqual(checkLogs(exchanges, good.join("\n")), []);
+
+  assert.match(checkLogs(exchanges, good.slice(0, 2).join("\n")).join(), /request b \(PATCH \/api\/tasks\/t1\/status\) was logged 0 times, expected once/);
+  assert.match(checkLogs(exchanges, [...good, good[1]].join("\n")).join(), /request a \(GET \/healthz\) was logged 2 times/);
+  const wrong = [good[0], line({ method: "GET", path: "/healthz", status: 500, requestId: "a", durationMs: -1, level: "INFO" }), good[2]];
+  assert.match(checkLogs(exchanges, wrong.join("\n")).join(), /request a logged status 500, expected 200.*durationMs -1.*level "INFO"/);
+  assert.match(checkLogs(exchanges, [...good, "listening on 8080"].join("\n")).join(), /stdout line is not JSON: listening on 8080/);
+  assert.match(checkLogs([...exchanges, { ...exchanges[0], path: "/api/tasks" }], good.join("\n")).join(), /request id a was given to 2 responses/);
+});
+
 test("setup steps stage the task a case is sent to", async (t) => {
   const cases = [
     { name: "done from in progress", ...moveTo("done"), setup: [moveTo("in_progress")], task: { status: "done" } },
@@ -110,7 +157,7 @@ test("the contract states every pair of statuses, legal or not, as the rules do"
 });
 
 test("judge checks the task's fields and values, not only the status", () => {
-  const answer = (body) => ({ status: 201, type: "application/json", text: JSON.stringify(body) });
+  const answer = (body) => ({ status: 201, type: "application/json", requestId: "r1", text: JSON.stringify(body) });
   const wanted = { status: 201, task: { status: "todo" } };
   assert.deepEqual(judge(wanted, answer({ id: "1", title: "a", status: "todo", createdAt: "x", updatedAt: "x" })), []);
   assert.match(judge(wanted, answer({ id: "1", title: "a", status: "todo" })).join(), /task fields/);

@@ -34,6 +34,8 @@ A value it cannot use stops the process with exit code 2 rather than falling bac
 
 Bodies are capped at 1 MiB and unknown fields are rejected with `400`. `HEAD` is answered wherever `GET` is. A missing or `null` title reads as empty (`422`); a title of another type, an empty body and a malformed path are refused as malformed (`400`). Every error is JSON, `{"error": "…"}`. The cases in [`scripts/contract/tasks-api.json`](../../scripts/contract/tasks-api.json) are the contract every task service keeps, and `node scripts/check-contract.mjs` holds this one to them.
 
+Every response carries an `X-Request-Id`: the one the caller sent when it is 1 to 128 letters, digits, `.`, `_` or `-`, otherwise a new one. Every request is logged once to stdout as one JSON line holding `time`, `level`, `msg` (`"request"`), `method`, `path` (without the query string, which can carry what should not be logged), `status`, `durationMs` and `requestId`. The line is the same in every task service, and the contract check reads it. [`scripts/contract/openapi.json`](../../scripts/contract/openapi.json) describes the same API for clients and tools, and is held to the same cases.
+
 One difference worth knowing: WSGI decodes `PATH_INFO` before a route sees it, so an id containing a percent-encoded slash only round-trips under a server that also exposes the raw target (gunicorn's `RAW_URI`), and the standard-library server collapses `//` at the start of a path before the application sees it. Generated ids never contain a slash, and non-canonical paths are outside the contract for every service.
 
 ## Check

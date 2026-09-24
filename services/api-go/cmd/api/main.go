@@ -7,6 +7,7 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	"github.com/hynix666/ultra-template/services/api-go/internal/app"
@@ -19,7 +20,7 @@ func main() {
 
 // run returns the exit code, so every deferred cleanup runs before the process exits.
 func run() int {
-	log := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+	log := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{ReplaceAttr: lowercaseLevel}))
 
 	cfg, err := config.FromEnv(os.Getenv)
 	if err != nil {
@@ -45,4 +46,14 @@ func run() int {
 	}
 
 	return 0
+}
+
+// lowercaseLevel writes "info" rather than slog's "INFO", as the other task services do, so one query
+// reads the logs of all of them.
+func lowercaseLevel(_ []string, attr slog.Attr) slog.Attr {
+	if attr.Key == slog.LevelKey {
+		attr.Value = slog.StringValue(strings.ToLower(attr.Value.String()))
+	}
+
+	return attr
 }
