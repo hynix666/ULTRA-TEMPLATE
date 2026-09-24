@@ -54,9 +54,22 @@ test("a block joined to several features is kept when any one of them is selecte
   assert.equal(applyMarkers(text, new Set(), known), "a\nz");
 });
 
-test("a joined block is malformed on an unknown id, a different end, or the reserved id", () => {
+test("a block joined with & is kept only when every one of its features is selected", () => {
+  const both = "web&go-service";
+  const text = ["a", begin(both), "calls", end(both), "z"].join("\n");
+  assert.equal(applyMarkers(text, new Set(["web", "go-service"]), known), "a\ncalls\nz");
+  assert.equal(applyMarkers(text, new Set(["web"]), known), "a\nz");
+  assert.equal(applyMarkers(text, new Set(["go-service"]), known), "a\nz");
+  assert.equal(applyMarkers(text, new Set(), known), "a\nz");
+});
+
+test("a joined block is malformed on an unknown id, a different end, the reserved id, or | and & mixed", () => {
   const cases = {
     unknown: [begin("web|nope"), end("web|nope")],
+    unknownAll: [begin("web&nope"), end("web&nope")],
+    mixed: [begin("web|go-service&web"), end("web|go-service&web")],
+    reservedAll: [begin("web&template"), end("web&template")],
+    otherJoiner: [begin("web&go-service"), end("web|go-service")],
     // The end names the same ids in the same order, so a half-edited pair is an error, not a guess.
     reordered: [begin("web|go-service"), end("go-service|web")],
     partial: [begin("web|go-service"), end("web")],

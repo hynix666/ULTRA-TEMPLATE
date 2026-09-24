@@ -40,7 +40,7 @@
     },
     "architecture": {
       "summary": "LikeC4 architecture-as-code: model rules run as tests, optional GitHub Pages site",
-      "paths": ["architecture", ".github/workflows/architecture.yml", "biome.jsonc"]
+      "paths": ["architecture", ".github/workflows/architecture.yml", "biome.jsonc", "scripts/check-architecture.mjs", "test/check-architecture.test.mjs"]
     },
     "release": {
       "summary": "release-please: release pull requests, tags and CHANGELOG from Conventional Commits",

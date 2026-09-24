@@ -19,4 +19,11 @@ specification {
       shape browser
     }
   }
+
+  element library {
+    notation "Published package"
+    style {
+      shape component
+    }
+  }
 }

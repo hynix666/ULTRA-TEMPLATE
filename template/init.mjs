@@ -39,9 +39,10 @@ export const TEMPLATE_ONLY_ID = "template";
 
 /**
  * A marker is one directive on its own line; the comment syntax around it belongs to the file type.
- * Its id is one feature, or several joined by `|` for a block that belongs to any of them.
+ * Its id is one feature, several joined by `|` for a block that belongs to any of them, or several
+ * joined by `&` for a block that needs all of them, such as a relation between two modules.
  */
-export const MARKER_RE = /ultra:(begin|end)\s+([a-z0-9-]+(?:\|[a-z0-9-]+)*)/;
+export const MARKER_RE = /ultra:(begin|end)\s+([a-z0-9-]+(?:[|&][a-z0-9-]+)*)/;
 
 const NAME_RE = /^[a-z][a-z0-9-]{0,62}[a-z0-9]$/;
 const OWNER_RE = /^[A-Za-z0-9][A-Za-z0-9-]{0,38}$/;
@@ -139,9 +140,10 @@ export const isUnder = (file, path) => file === path || file.startsWith(`${path}
 
 /**
  * Keeps the blocks of selected features and deletes the rest, marker lines included. A block whose id
- * joins several features with `|` is kept when any one of them is selected, and its end must name the
- * same ids in the same order. Throws on an unknown id, a nested begin, an end without its begin, or a
- * block never closed — a malformed marker would otherwise delete the rest of the file silently.
+ * joins several features with `|` is kept when any one of them is selected, and one joined with `&` only
+ * when all of them are; its end must name the same ids in the same order. Throws on an unknown id, an id
+ * that mixes `|` and `&`, a nested begin, an end without its begin, or a block never closed — a malformed
+ * marker would otherwise delete the rest of the file silently.
  */
 export function applyMarkers(text, selected, known, file = "<text>") {
   const lines = text.split("\n");
@@ -160,7 +162,11 @@ export function applyMarkers(text, selected, known, file = "<text>") {
     }
     const [, kind, id] = match;
     const where = `${file}:${i + 1}`;
-    const ids = id.split("|");
+    const all = id.includes("&");
+    if (all && id.includes("|")) {
+      throw new InitError(`${where}: "${id}" mixes | and &; a block needs any of its features or all of them, so write two blocks.`);
+    }
+    const ids = id.split(/[|&]/);
     for (const one of ids) {
       if (one !== TEMPLATE_ONLY_ID && !known.has(one)) throw new InitError(`${where}: marker names unknown feature "${one}".`);
     }
@@ -173,7 +179,8 @@ export function applyMarkers(text, selected, known, file = "<text>") {
       if (open !== null) {
         throw new InitError(`${where}: "${id}" block opens inside the "${open.id}" block from line ${open.line}; blocks do not nest.`);
       }
-      open = { id, line: i + 1, keep: !ids.includes(TEMPLATE_ONLY_ID) && ids.some((one) => selected.has(one)) };
+      const chosen = (one) => selected.has(one);
+      open = { id, line: i + 1, keep: !ids.includes(TEMPLATE_ONLY_ID) && (all ? ids.every(chosen) : ids.some(chosen)) };
     } else {
       if (open === null || open.id !== id) {
         throw new InitError(`${where}: end of "${id}" block that was never opened.`);

@@ -26,6 +26,8 @@ Several features may own the same path, which then belongs to any of them and is
 
 **Any of several features.** An id may join features with `|` — `FEATURE-A|FEATURE-B` — for content that belongs to a project with any one of them. The end marker names the same ids in the same order, so a half-edited pair is an error rather than a guess, and `template` cannot be joined to a feature. `AGENTS.md`'s paragraph on the task API contract is written this way: it belongs to a project with a Go, TypeScript or Python service, and to no other.
 
+**All of several features.** An id may instead join features with `&` — `FEATURE-A&FEATURE-B` — for content that needs every one of them, such as a relation between two modules. The architecture model draws the MCP server's and the web app's calls to each task service this way, so a project keeps the arrow only when it keeps both ends. One id cannot mix `|` and `&`; content that needs a mix is two blocks.
+
 Strict JSON has no comments, so JSON files carry no markers; a feature that needs a JSON file owns the whole file as a path. Content that should appear only when two features are *both* selected cannot be expressed, and is avoided by design (the architecture model links each service to the user rather than to the web app).
 
 A marker is a whole line, and in Markdown it is an HTML comment, which ends a table and splits a paragraph. So a block is whole lines that already stand alone — a paragraph, a list item, a fenced block — never a row of a table or a sentence inside a paragraph. A path, not a marker, is how a whole file is made conditional.

@@ -4,12 +4,12 @@
  * that breaks it and watch it fire.
  */
 
-const DEPLOYABLE = new Set(["service", "webapp"]);
+const BUILT = new Set(["service", "webapp", "library"]);
 
-/** Every deployable element says what it is built with and what it is for. */
+/** Every element this project builds says what it is built with and what it is for. */
 export function undocumented(model) {
   return [...model.elements()]
-    .filter((element) => DEPLOYABLE.has(element.kind))
+    .filter((element) => BUILT.has(element.kind))
     .flatMap((element) => [
       ...(element.technology ? [] : [`${element.id} has no technology`]),
       ...(element.description.isEmpty ? [`${element.id} has no description`] : []),
