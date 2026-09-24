@@ -41,7 +41,17 @@ const LEDGER = {
     paths: [".github/workflows/template-test.yml", "template/init.test.mjs", "template/template-update.test.mjs"],
   },
   "The same checks everywhere.": {
-    paths: ["services/api-ts/biome.jsonc", "scripts/modules.mjs", "scripts/coverage-summary.mjs", ".github/workflows/verify.yml"],
+    paths: [
+      "biome.jsonc",
+      "scripts/modules.mjs",
+      "scripts/verify.mjs",
+      "scripts/tools.mjs",
+      ".github/actions/module/action.yml",
+      "scripts/agent-env.mjs",
+      ".claude/settings.json",
+      "scripts/coverage-summary.mjs",
+      ".github/workflows/verify.yml",
+    ],
   },
 };
 

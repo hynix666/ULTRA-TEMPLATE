@@ -19,7 +19,7 @@ It is for anyone starting a service, a web app, a library or an MCP server who w
 - **Architecture as code.** A LikeC4 model with rules checked in CI.
 - **One set of instructions for agents.** `AGENTS.md` is the only copy; `CLAUDE.md`, `GEMINI.md` and Copilot's file point at it, and a check fails when one starts saying something else.
 - **Selectable features, tested.** CI generates a project from every preset and runs that project's own checks, and a project can add or remove a feature later with the same three-way merge that brings in template releases.
-- **The same checks everywhere.** Node modules lint and format with Biome as Go and Python modules do with their own tools, local runs refuse a Node other than CI's, the chassis runs on Windows in CI, and every module's coverage is reported without being gated.
+- **The same checks everywhere.** Node modules lint and format with Biome, from one configuration, as Go and Python modules do with their own tools; local runs refuse a Node other than CI's and a pinned tool at another version; CI runs each module's checks from the same `module.json` through the same script; a cloud agent's session gets CI's toolchains before its first command; the chassis runs on Windows in CI; and every module's coverage is reported without being gated.
 
 ## Start a project
 
@@ -160,11 +160,11 @@ Each toolchain version is pinned once, in the file named beside it above, so the
 
 ## Working with a coding agent
 
-[AGENTS.md](AGENTS.md) holds the rules every coding agent follows here; `CLAUDE.md`, `GEMINI.md` and Copilot's instructions point to it rather than repeating it. For a recurring task, such as recording a decision or taking a template update, the matching procedure in `.claude/skills/` is the one to follow. Ask the agent to run `node scripts/verify.mjs` and to say what it ran before it reports a change as done.
+[AGENTS.md](AGENTS.md) holds the rules every coding agent follows here; `CLAUDE.md`, `GEMINI.md` and Copilot's instructions point to it rather than repeating it. For a recurring task, such as recording a decision, changing the task contract or taking a template update, the matching procedure in `.claude/skills/` is the one to follow. Ask the agent to run `node scripts/verify.mjs` and to say what it ran before it reports a change as done. In a Claude Code cloud session, `.claude/settings.json` has the session prepare itself first — the Node `.node-version` names, the pinned tools, then setup — so the agent's first `verify` checks what CI checks.
 
 ## Continuous integration
 
-- **`verify.yml`** — on every pull request, every push to `main`, and in a merge queue: repository hygiene, chassis tests on Linux and on Windows, actionlint, a security audit of the workflows with [zizmor](https://docs.zizmor.sh), and one job per module — each service job also runs the API contract and starts the service's container image to prove it answers, and each module job writes its test coverage to the job summary, reported and never gated — all feeding the aggregate **`verify`** job, which is the only required check ([ADR-0002](docs/adr/0002-one-required-check.md), [ADR-0011](docs/adr/0011-what-local-verify-guarantees.md)).
+- **`verify.yml`** — on every pull request, every push to `main`, and in a merge queue: repository hygiene, chassis tests on Linux and on Windows, actionlint, a security audit of the workflows with [zizmor](https://docs.zizmor.sh), the agent environment run from the oldest Node it supports, and one job per module, which runs what the module's `module.json` names through the same `verify.mjs` a contributor runs — its checks, the API contract, its facts, its end-to-end check — then writes its test coverage to the job summary, reported and never gated, and starts its container image and holds it to the contract's defaults and clean shutdown. All of them feed the aggregate **`verify`** job, the only required check ([ADR-0002](docs/adr/0002-one-required-check.md), [ADR-0011](docs/adr/0011-what-local-verify-guarantees.md), [ADR-0014](docs/adr/0014-modules-describe-themselves.md)).
 - **`pr-title.yml`** — pull request titles follow Conventional Commits.
 - **`copilot-setup-steps.yml`** — the environment GitHub's Copilot coding agent prepares before it works here: every toolchain the selected features need, then `node scripts/setup.mjs`. It runs on its own only when it changes.
 - **`security.yml`** — report-only scans that fail only when a scan could not run: gitleaks over new commits and weekly over history, `npm audit` for every npm lockfile, and a Trivy scan of every container image the repository builds, for fixable high and critical vulnerabilities in its operating-system and language packages.
@@ -174,7 +174,7 @@ Each toolchain version is pinned once, in the file named beside it above, so the
 <!-- ultra:begin py-service -->
 - **`security.yml`, Python** — pip-audit over the Python service's lockfile.
 <!-- ultra:end py-service -->
-- **`pins.yml`** — weekly, report-only: which tools pinned by hand in the workflows have a newer release. It never moves a pin; [docs/toolchain-updates.md](docs/toolchain-updates.md) says how.
+- **`pins.yml`** — weekly, report-only: which tools pinned by hand in `scripts/tools/tools.json` have a newer release. It never moves a pin; [docs/toolchain-updates.md](docs/toolchain-updates.md) says how.
 - **`codeql.yml`** — CodeQL analysis; enable it by setting the repository variable `CODEQL_ENABLED=true` (needs a public repository or GitHub Advanced Security).
 - **`scorecard.yml`** — [OpenSSF Scorecard](https://scorecard.dev): an outside measurement of the practices this repository claims, published and uploaded to code scanning; enable it with `SCORECARD_ENABLED=true` on a public repository. Some checks measure the project rather than the workflows, and a new or single-maintainer repository scores low on them: Code-Review and Branch-Protection while pull requests merge without a second person's review, Maintained for its first 90 days, SAST until CodeQL has run on recent pull requests, and CII-Best-Practices until the project registers for the badge.
 <!-- ultra:begin mcp-server -->

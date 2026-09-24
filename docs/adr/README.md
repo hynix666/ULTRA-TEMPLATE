@@ -18,3 +18,7 @@ Records are amended, not rewritten. When a decision changes, a new record supers
 | [0010](0010-one-statement-of-the-task-rules.md) | State the task rules once, and hold every copy and the API contract to it | Accepted, amends 0005, 0007, 0008 |
 | [0011](0011-what-local-verify-guarantees.md) | Hold local verify to CI's toolchain, and name what only CI runs | Accepted, amends 0002 |
 | [0012](0012-lint-and-format-typescript-with-biome.md) | Lint and format the Node modules with Biome | Accepted |
+| [0013](0013-declare-each-fact-once.md) | Declare each fact once, then derive it or check every copy | Accepted, amends 0004, 0010 |
+| [0014](0014-modules-describe-themselves.md) | Modules describe themselves in `module.json` | Accepted, amends 0008, 0011 |
+| [0015](0015-one-manifest-for-hand-pinned-tools.md) | Hand-pinned tools live in one manifest | Accepted, amends 0003 |
+| [0016](0016-cloud-agents-get-the-same-toolchains.md) | Cloud agents get the same toolchains | Accepted, amends 0009, 0011 |
