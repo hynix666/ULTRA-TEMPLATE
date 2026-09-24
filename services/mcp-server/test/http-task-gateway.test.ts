@@ -42,6 +42,19 @@ test("each call goes to the documented route with the documented body", async ()
   assert.equal(calls[2]?.body, '{"status":"in_progress"}');
 });
 
+test("finding a task asks for it by id, and a 404 means there is none", async () => {
+  const { fetch, calls } = stubFetch(({ url }) => (url.endsWith("/t1") ? json(task()) : json({ error: "task not found" }, 404)));
+  const gateway = gatewayFor(fetch);
+  assert.deepEqual(await gateway.find("t1"), task());
+  assert.equal(await gateway.find("t 9"), undefined);
+  assert.deepEqual(calls.map((call) => `${call.method} ${call.url}`), ["GET http://localhost:8080/api/tasks/t1", "GET http://localhost:8080/api/tasks/t%209"]);
+});
+
+test("any other failure while finding a task is still a gateway error", async () => {
+  const { fetch } = stubFetch(() => json({ error: "internal error" }, 500));
+  await assert.rejects(() => gatewayFor(fetch).find("t1"), (err: GatewayError) => /returned 500/.test(err.message));
+});
+
 test("a base URL with a path or a trailing slash still addresses /api/tasks", async () => {
   const { fetch, calls } = stubFetch(() => json([]));
   await createHttpTaskGateway({ baseUrl: "http://tasks.internal/", timeoutMs: 50, fetch }).list();

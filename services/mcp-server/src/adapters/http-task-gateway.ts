@@ -24,7 +24,8 @@ export function createHttpTaskGateway(options: HttpGatewayOptions): TaskGateway 
   const doFetch = options.fetch ?? globalThis.fetch;
   const url = (path: string) => new URL(path.replace(/^\//, ""), `${options.baseUrl.replace(/\/$/, "")}/`).toString();
 
-  async function request(path: string, init: RequestInit = {}): Promise<unknown> {
+  /** The parsed body, or undefined for a 404 when `missing` says a missing resource is an answer. */
+  async function request(path: string, init: RequestInit = {}, missing = false): Promise<unknown> {
     let response: Response;
     try {
       response = await doFetch(url(path), {
@@ -37,6 +38,7 @@ export function createHttpTaskGateway(options: HttpGatewayOptions): TaskGateway 
       throw new GatewayError(`${init.method ?? "GET"} ${url(path)} failed: ${reason}`);
     }
     const text = await response.text();
+    if (missing && response.status === 404) return undefined;
     if (!response.ok) {
       throw new GatewayError(`${init.method ?? "GET"} ${url(path)} returned ${response.status}: ${text.slice(0, MAX_BODY_CHARS)}`);
     }
@@ -50,6 +52,10 @@ export function createHttpTaskGateway(options: HttpGatewayOptions): TaskGateway 
   return {
     async list(): Promise<readonly Task[]> {
       return parseTasks(await request("/api/tasks"));
+    },
+    async find(id: string): Promise<Task | undefined> {
+      const body = await request(`/api/tasks/${encodeURIComponent(id)}`, {}, true);
+      return body === undefined ? undefined : parseTask(body);
     },
     async create(title: string): Promise<Task> {
       return parseTask(await request("/api/tasks", { method: "POST", body: JSON.stringify({ title }) }));

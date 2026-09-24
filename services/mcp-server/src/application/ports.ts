@@ -7,6 +7,8 @@ import type { Status, Task } from "../domain/task.ts";
  */
 export interface TaskGateway {
   list(): Promise<readonly Task[]>;
+  /** The task with this id, or undefined when the API has none. */
+  find(id: string): Promise<Task | undefined>;
   create(title: string): Promise<Task>;
   move(id: string, status: Status): Promise<Task>;
 }

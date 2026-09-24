@@ -14,6 +14,9 @@ export function fakeGateway(initial: readonly Task[] = []): TaskGateway & { read
     async list() {
       return [...tasks];
     },
+    async find(id: string) {
+      return tasks.find((task) => task.id === id);
+    },
     async create(title: string) {
       const now = "2026-01-02T03:04:05Z";
       const task: Task = { id: `t${next++}`, title, status: "todo", createdAt: now, updatedAt: now };

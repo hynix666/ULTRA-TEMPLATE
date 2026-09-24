@@ -35,10 +35,54 @@ const failed = (result: unknown): boolean => (result as ToolCall).isError === tr
 test("every tool is advertised with a schema a client can read", async (t) => {
   const client = await connect(t, fakeGateway());
   const { tools } = await client.listTools();
-  assert.deepEqual(tools.map((tool) => tool.name).sort(), ["create_task", "list_tasks", "move_task"]);
+  assert.deepEqual(tools.map((tool) => tool.name).sort(), ["create_task", "get_task", "list_tasks", "move_task"]);
   const move = tools.find((tool) => tool.name === "move_task");
   assert.deepEqual(move?.inputSchema.required, ["id", "status"]);
   assert.ok(tools.every((tool) => (tool.description ?? "") !== ""), "a tool with no description cannot be chosen");
+  assert.ok(tools.every((tool) => tool.outputSchema?.type === "object"), "every tool declares what its structured result holds");
+});
+
+test("each tool tells a client whether it only reads", async (t) => {
+  const { tools } = await (await connect(t, fakeGateway())).listTools();
+  const hints = Object.fromEntries(tools.map((tool) => [tool.name, tool.annotations]));
+  assert.equal(hints["list_tasks"]?.readOnlyHint, true);
+  assert.equal(hints["get_task"]?.readOnlyHint, true);
+  for (const name of ["create_task", "move_task"]) {
+    assert.equal(hints[name]?.readOnlyHint, false, name);
+    assert.equal(hints[name]?.idempotentHint, false, name);
+  }
+  assert.ok(tools.every((tool) => tool.annotations?.destructiveHint === false), "no tool here deletes anything");
+});
+
+test("every result carries structured content that says what the text says", async (t) => {
+  const client = await connect(t, fakeGateway());
+  const structured = (result: unknown) => (result as { structuredContent?: Record<string, unknown> }).structuredContent;
+
+  assert.deepEqual(structured(await client.callTool({ name: "list_tasks", arguments: {} })), { tasks: [] });
+  const created = structured(await client.callTool({ name: "create_task", arguments: { title: "Write the README" } }));
+  assert.deepEqual(created?.["task"], {
+    id: "t1",
+    title: "Write the README",
+    status: "todo",
+    createdAt: "2026-01-02T03:04:05Z",
+    updatedAt: "2026-01-02T03:04:05Z",
+    nextStatuses: ["in_progress"],
+  });
+  const moved = structured(await client.callTool({ name: "move_task", arguments: { id: "t1", status: "in_progress" } }));
+  assert.deepEqual((moved?.["task"] as { nextStatuses?: string[] }).nextStatuses, ["todo", "done"]);
+  const listed = structured(await client.callTool({ name: "list_tasks", arguments: {} }));
+  assert.equal((listed?.["tasks"] as unknown[]).length, 1);
+});
+
+test("get_task answers with one task, and names an unknown id as NOT_FOUND", async (t) => {
+  const client = await connect(t, fakeGateway([task({ id: "t1", status: "in_progress" })]));
+  const found = await client.callTool({ name: "get_task", arguments: { id: "t1" } });
+  assert.equal(failed(found), false);
+  assert.match(said(found), /t1 {2}in_progress .*moves from here: todo, done/);
+
+  const missing = await client.callTool({ name: "get_task", arguments: { id: "t9" } });
+  assert.equal(failed(missing), true);
+  assert.match(said(missing), /NOT_FOUND: no task with id "t9"; list_tasks names every task/);
 });
 
 test("the tools create, list and move a task", async (t) => {
@@ -84,6 +128,9 @@ test("an API that cannot answer is reported with what was tried", async (t) => {
   const unreachable: TaskGateway = {
     async list() {
       throw new GatewayError("GET http://localhost:8080/api/tasks failed: no answer within 10000 ms");
+    },
+    async find() {
+      throw new GatewayError("unused");
     },
     async create() {
       throw new GatewayError("unused");

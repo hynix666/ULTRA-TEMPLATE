@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { createTask, listTasks, moveTask } from "../src/application/task-tools.ts";
+import { createTask, getTask, listTasks, moveTask } from "../src/application/task-tools.ts";
 import { DomainError } from "../src/domain/task.ts";
 import { fakeGateway, task } from "./fake-gateway.ts";
 
@@ -32,4 +32,10 @@ test("an unknown id and an unknown status each fail before the call", async () =
 test("listing passes the gateway's answer through untouched", async () => {
   const tasks = [task({ id: "t1" }), task({ id: "t2", status: "done" })];
   assert.deepEqual(await listTasks(fakeGateway(tasks)), tasks);
+});
+
+test("getting a task answers with it, and an unknown id is NOT_FOUND rather than a gateway failure", async () => {
+  const gateway = fakeGateway([task({ id: "t1" })]);
+  assert.deepEqual(await getTask(gateway, "t1"), task({ id: "t1" }));
+  await assert.rejects(() => getTask(gateway, "t9"), (err: DomainError) => err.code === "NOT_FOUND" && /list_tasks/.test(err.message));
 });

@@ -1,6 +1,6 @@
 # mcp-server
 
-An [MCP](https://modelcontextprotocol.io) server that gives an AI assistant three tools over the task API: `list_tasks`, `create_task` and `move_task`. It speaks the protocol over stdio, so a client starts it as a subprocess.
+An [MCP](https://modelcontextprotocol.io) server that gives an AI assistant four tools over the task API: `list_tasks`, `get_task`, `create_task` and `move_task`. It speaks the protocol over stdio, so a client starts it as a subprocess.
 
 It is the same architecture as the services beside it, with the transport changed ([ADR-0007](../../docs/adr/0007-mcp-server-as-an-adapter.md)): `src/domain` holds the rules, `src/application` the use cases behind an outbound port, `src/adapters` the two things that touch the outside world — the HTTP client that calls the task API, and the MCP layer that publishes the use cases as tools — and `src/main.ts` wires them. `npm run check:boundaries` fails the build when a layer reaches past its allowlist.
 
@@ -38,11 +38,14 @@ A value it cannot use stops the process at startup. A server that starts and the
 
 ## Tools
 
-| Tool | Input | Answers with |
-|---|---|---|
-| `list_tasks` | — | Every task, its status, and the moves that status allows |
-| `create_task` | `title` | The created task, in `todo` |
-| `move_task` | `id`, `status` | The moved task, or which moves are legal from where it is |
+| Tool | Input | Answers with | Hints |
+|---|---|---|---|
+| `list_tasks` | — | Every task, its status, and the moves that status allows | read-only |
+| `get_task` | `id` | One task, or `NOT_FOUND` naming how to find the id | read-only |
+| `create_task` | `title` | The created task, in `todo` | writes, not idempotent |
+| `move_task` | `id`, `status` | The moved task, or which moves are legal from where it is | writes, not idempotent |
+
+Every tool declares an output schema, and every successful result carries `structuredContent` beside the text: `{ "tasks": [...] }` or `{ "task": {...} }`, each task with the `nextStatuses` its status allows. A client can parse the value while a model reads the text, and both say the same thing. The hints (`readOnlyHint`, `idempotentHint`, `destructiveHint: false`, `openWorldHint: false`) tell a client which calls it may make without asking.
 
 A failure the caller can act on — a broken rule, an unreachable API — comes back as a tool result with `isError: true` and the reason. Only a bug here throws, because a thrown error reaches the model as a protocol error it cannot inspect.
 
