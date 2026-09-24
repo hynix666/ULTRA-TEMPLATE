@@ -6,7 +6,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
-import { checkDocs, frontmatter, IMPORT_TEXT, linksTo, markdownLinks, MAX_POINTER_LINES, MAX_SKILL_DESCRIPTION } from "../scripts/check-docs.mjs";
+import { checkDocs, frontmatter, hookProblems, IMPORT_TEXT, linksTo, markdownLinks, MAX_POINTER_LINES, MAX_SKILL_DESCRIPTION } from "../scripts/check-docs.mjs";
 
 const skill = (name, description = "When to use it.") => `---\nname: ${name}\ndescription: ${description}\n---\n\n# ${name}\n`;
 
@@ -147,4 +147,15 @@ test("frontmatter and link matching read what they claim to read", () => {
     { target: "x.md", line: 1 },
     { target: "z.md", line: 3 },
   ]);
+});
+
+test("a Claude Code hook must be a command, and a script it runs from the repository must be tracked", () => {
+  const settings = (command) => ({ hooks: { SessionStart: [{ hooks: [{ type: "command", command }] }] } });
+  const tracked = ["scripts/agent-env.mjs"];
+  assert.deepEqual(hookProblems(settings('node "$CLAUDE_PROJECT_DIR/scripts/agent-env.mjs"'), tracked), []);
+  assert.deepEqual(hookProblems(settings("node ${CLAUDE_PROJECT_DIR}/scripts/agent-env.mjs"), tracked), []);
+  assert.match(hookProblems(settings('node "$CLAUDE_PROJECT_DIR/scripts/gone.mjs"'), tracked).join(), /hooks\.SessionStart\[0\]\.hooks\[0\] runs scripts\/gone\.mjs, which is not tracked/);
+  assert.match(hookProblems({ hooks: { SessionStart: [{ hooks: [{ type: "prompt" }] }] } }, tracked).join(), /is not \{"type": "command"/);
+  assert.match(hookProblems({ hooks: { SessionStart: {} } }, tracked).join(), /hooks\.SessionStart is not a list/);
+  assert.deepEqual(hookProblems({}, tracked), []);
 });

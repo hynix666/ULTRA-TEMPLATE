@@ -25,6 +25,7 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
 import { available, checkNodeVersion, e2ePartner, ModuleError, presentModules, REQUIREMENTS, ROOT, run, skipOutcome, TOOLCHAINS } from "./modules.mjs";
+import { installedVersion, loadTools, TOOLS_FILE, versionProblem } from "./tools.mjs";
 
 const { values: flags, positionals: requested } = parseArgs({
   allowPositionals: true,
@@ -53,6 +54,22 @@ function chassis() {
   const suites = ["test/*.test.mjs"];
   if (existsSync(join(ROOT, "template"))) suites.push("template/*.test.mjs");
   step("chassis: tests", ["node", "--test", ...suites]);
+  // The chassis tools (actionlint, zizmor) run in jobs of their own in CI; here they run when installed,
+  // and a different version than the pin fails rather than passing on rules CI does not apply.
+  for (const [name, tool] of Object.entries(pinnedTools())) {
+    if (tool.for !== "chassis" || !tool.check) continue;
+    const found = flags["dry-run"] ? tool.version : installedVersion(name, tools);
+    if (found === null) record(`chassis: ${name}`, "skipped", `not on PATH; its own CI job runs it, and node scripts/tools.mjs install ${name} installs it here`);
+    else if (versionProblem(name, found, tools)) record(`chassis: ${name}`, "fail", versionProblem(name, found, tools));
+    else step(`chassis: ${name}`, tool.check);
+  }
+}
+
+let tools = null;
+/** The hand-pinned tools, or none in a project that dropped scripts/tools/tools.json. */
+function pinnedTools() {
+  tools ??= existsSync(TOOLS_FILE) ? loadTools() : {};
+  return tools;
 }
 
 const elsewhere = (module) => (skipOutcome() === "fail" ? "this CI job must run it" : `the ${module.id} CI job runs it`);
@@ -67,6 +84,11 @@ function check(module, cwd, spec) {
   }
   if (spec.tool !== undefined && !flags["dry-run"] && !available(spec.tool, ["--version"])) {
     record(name, skipOutcome(), `${spec.tool} is not on PATH; ${elsewhere(module)}`);
+    return;
+  }
+  const wrongVersion = spec.tool !== undefined && !flags["dry-run"] && spec.tool in pinnedTools() ? versionProblem(spec.tool, installedVersion(spec.tool, tools), tools) : null;
+  if (wrongVersion) {
+    record(name, "fail", wrongVersion);
     return;
   }
   if (spec.expect === "no-output" && !flags["dry-run"]) {

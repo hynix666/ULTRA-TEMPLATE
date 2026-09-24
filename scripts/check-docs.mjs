@@ -20,6 +20,9 @@
  *      differs from AGENTS.md only in case, which a case-insensitive filesystem will hide.
  *   8. Copilot's .github/agents and .github/prompts files carry the frontmatter they are selected
  *      on and defer to AGENTS.md, so the vendor surface never becomes a second rulebook.
+ *   9. .claude/settings.json, when tracked, parses, and every hook in it is a command whose files in
+ *      the repository ($CLAUDE_PROJECT_DIR/…) are tracked. A hook that names a missing script fails in
+ *      every session that starts, far from the change that broke it.
  *
  *   node scripts/check-docs.mjs
  *
@@ -40,6 +43,32 @@ export const MAX_POINTER_LINES = 20;
 /** The singular name some tools once looked for: a file nothing reads today. */
 export const WRONG_NAME = "AGENT.MD";
 /** Copilot's own customization surface: task-shaped wrappers, never a second set of rules. */
+export const CLAUDE_SETTINGS = ".claude/settings.json";
+
+/** Every way a Claude Code settings object's hooks are malformed or name a file that is not tracked. */
+export function hookProblems(settings, tracked) {
+  const problems = [];
+  for (const [event, groups] of Object.entries(settings?.hooks ?? {})) {
+    if (!Array.isArray(groups)) {
+      problems.push(`hooks.${event} is not a list`);
+      continue;
+    }
+    for (const [i, group] of groups.entries()) {
+      for (const [j, hook] of (Array.isArray(group?.hooks) ? group.hooks : [null]).entries()) {
+        const at = `hooks.${event}[${i}].hooks[${j}]`;
+        if (hook?.type !== "command" || typeof hook.command !== "string" || hook.command.trim() === "") {
+          problems.push(`${at} is not {"type": "command", "command": …}`);
+          continue;
+        }
+        for (const match of hook.command.matchAll(/\$\{?CLAUDE_PROJECT_DIR\}?\/([^\s"']+)/g)) {
+          if (!tracked.includes(match[1])) problems.push(`${at} runs ${match[1]}, which is not tracked`);
+        }
+      }
+    }
+  }
+  return problems;
+}
+
 export const VENDOR_DIRS = [
   // An agent file is chosen by name; a prompt file is chosen by its filename, so it needs no name field.
   { dir: ".github/agents", suffix: ".agent.md", requires: ["name", "description"] },
@@ -257,6 +286,13 @@ export function checkDocs(root = process.cwd()) {
   }
 
   checkVendorFiles(root, tracked, failures);
+  if (tracked.includes(CLAUDE_SETTINGS)) {
+    try {
+      failures.push(...hookProblems(JSON.parse(read(CLAUDE_SETTINGS)), tracked).map((problem) => `\`${CLAUDE_SETTINGS}\` ${problem}.`));
+    } catch (err) {
+      failures.push(`\`${CLAUDE_SETTINGS}\` is not valid JSON: ${err.message}. Claude Code ignores a settings file it cannot read, hooks and all.`);
+    }
+  }
   const skillCount = checkSkills(root, tracked, failures);
   const docCount = checkDocsTree(root, tracked, failures);
   const linkCount = checkLinks(root, tracked, failures);

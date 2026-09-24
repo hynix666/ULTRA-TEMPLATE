@@ -83,9 +83,9 @@ Every Node module lints and formats with Biome, with the settings in the root `b
 
 ## Skills
 
-Step-by-step procedures for recurring tasks live in `.claude/skills/<name>/SKILL.md`: recording a decision, adding an endpoint or tool to each module present, and taking a later template release into this project. Follow the matching skill instead of improvising the procedure. They are plain Markdown, so any assistant can read them from there; Claude Code also loads them by name. Keep them as real files, never symlinks: the repository must work in a Windows checkout.
+Step-by-step procedures for recurring tasks live in `.claude/skills/<name>/SKILL.md`: recording a decision, adding an endpoint or tool to each module present, changing the task contract in every module at once, and taking a later template release into this project. Follow the matching skill instead of improvising the procedure. They are plain Markdown, so any assistant can read them from there; Claude Code also loads them by name. Keep them as real files, never symlinks: the repository must work in a Windows checkout.
 
-An assistant working in GitHub's cloud prepares its environment with `.github/workflows/copilot-setup-steps.yml`, which installs every module's dependencies the way `node scripts/setup.mjs` does locally.
+An assistant working in GitHub's cloud prepares its environment with `.github/workflows/copilot-setup-steps.yml`, which installs every module's dependencies the way `node scripts/setup.mjs` does locally. A Claude Code cloud session prepares its own with the SessionStart hook in `.claude/settings.json`, which runs `scripts/agent-env.mjs`: the Node `.node-version` names, the pinned tools this checkout's modules run, and then setup, all checksum-verified and on PATH before the first command.
 
 ## Documentation
 

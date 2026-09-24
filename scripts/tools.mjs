@@ -57,6 +57,7 @@ export function validateTools(tools) {
     if ("platforms" in tool && !["file", "sidecar", "githubDigest"].some((key) => key in (tool.checksums ?? {}))) {
       say("`checksums` must say where the release publishes its checksum: file, sidecar or githubDigest");
     }
+    if ("check" in tool && (!Array.isArray(tool.check) || tool.check.length === 0 || tool.for !== "chassis")) say("`check` is the command verify runs for a chassis tool");
     for (const [feature, option] of Object.entries(tool.devcontainer ?? {})) {
       if (typeof option !== "string" || option === "") say(`\`devcontainer.${feature}\` names the Dev Container feature option that sets this tool's version`);
     }
@@ -133,6 +134,17 @@ export function installedVersion(name, tools = loadTools()) {
   const out = spawnSync(cmd, args, { encoding: "utf8" });
   if (out.error || out.status !== 0) return null;
   return /(\d+\.\d+\.\d+)/.exec(`${out.stdout}${out.stderr}`)?.[1] ?? null;
+}
+
+/**
+ * Why the `name` on PATH cannot stand in for the pinned one, or null when it can or the manifest pins no
+ * such tool. A different version reads the same rules differently, so a local pass would predict nothing
+ * about CI's run (D7 in the v1.2.0 plan: a golangci-lint 2.5 on PATH could not lint a Go 1.26 module).
+ */
+export function versionProblem(name, found, tools = loadTools()) {
+  const tool = tools[name];
+  if (!tool?.versionCommand || found === null || found === tool.version) return null;
+  return `${name} ${found} is on PATH, but scripts/tools/tools.json pins ${tool.version}, which CI runs. Run node scripts/tools.mjs install --local, and put .tools/bin first on PATH`;
 }
 
 /**

@@ -1,5 +1,5 @@
 {
-  "$comment": "Every tool this repository runs at a version it pins by hand, because Dependabot cannot see it: one place for the version, the release it comes from and, for a downloaded binary, the SHA-256 taken from that release. scripts/tools.mjs installs, runs and bumps them from here, the workflows and the agent environment read them from here, and check-hygiene rule 16 fails on a pin written anywhere else. `for` says where a tool is needed: `chassis` everywhere, a toolchain name wherever a module of that toolchain is present, and `ci` only in CI. `devcontainer` names the Dev Container feature option that installs a tool, which check-hygiene rule 17 holds to the version here. docs/toolchain-updates.md says how to move one.",
+  "$comment": "Every tool this repository runs at a version it pins by hand, because Dependabot cannot see it: one place for the version, the release it comes from and, for a downloaded binary, the SHA-256 taken from that release. scripts/tools.mjs installs, runs and bumps them from here, the workflows and the agent environment read them from here, and check-hygiene rule 16 fails on a pin written anywhere else. `for` says where a tool is needed: `chassis` everywhere, a toolchain name wherever a module of that toolchain is present, and `ci` only in CI. `check` is how scripts/verify.mjs runs a chassis tool when it is installed. `devcontainer` names the Dev Container feature option that installs a tool, which check-hygiene rule 17 holds to the version here. docs/toolchain-updates.md says how to move one.",
   "tools": {
     "actionlint": {
       "version": "1.7.12",
@@ -36,6 +36,10 @@
       "versionCommand": [
         "actionlint",
         "-version"
+      ],
+      "check": [
+        "actionlint",
+        "-color"
       ]
     },
     "zizmor": {
@@ -59,6 +63,11 @@
       "versionCommand": [
         "zizmor",
         "--version"
+      ],
+      "check": [
+        "zizmor",
+        "--offline",
+        "."
       ]
     },
     "golangci-lint": {
