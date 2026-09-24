@@ -6,10 +6,11 @@
     "requestId": { "characters": "A-Za-z0-9._-", "maxLength": 128 }
   },
   "startup": {
-    "$comment": "How a task service reports that it started, or that it refused its configuration. The listening line carries every variable in `config` under its `reportedAs` field, with the value in effect. A refused configuration writes one `refused` line, whose `error` names the variable, and exits with `exitCode`. `ready` is the request every check polls until the service answers it.",
+    "$comment": "How a task service reports that it started, or that it refused its configuration. The listening line carries every variable in `config` under its `reportedAs` field, with the value in effect. A refused configuration writes one `refused` line, whose `error` names the variable, and exits with `exitCode`. `ready` is the request every check polls until the service answers it. Sent `stopped.signal`, as `docker stop` sends it, a service finishes what it is serving and exits with `stopped.exitCode` within the timeout the `within` variable sets; CI's image probe (scripts/probe-image.mjs) checks it on each image, with every variable at its default.",
     "ready": { "method": "GET", "path": "/healthz", "status": 200 },
     "listening": { "level": "info", "msg": "listening" },
-    "refused": { "level": "error", "msg": "invalid configuration", "exitCode": 2 }
+    "refused": { "level": "error", "msg": "invalid configuration", "exitCode": 2 },
+    "stopped": { "signal": "SIGTERM", "exitCode": 0, "within": "SHUTDOWN_TIMEOUT" }
   },
   "config": {
     "$comment": "Every environment variable a task service reads. An unset or empty variable reads as its default. Each value under `accept` starts the service with `effective` in effect; each under `refuse` is refused as `startup` says. `{port}` is a free port, and `{port:fullwidth}` and `{port:arabic-indic}` write it in another script's digits, which Go's strconv.Atoi refuses and so every service must. The default of a variable that `binds` a port is checked by CI's image probe only, so no check binds that port on a developer's machine. SHUTDOWN_TIMEOUT takes Go's duration syntax, up to the longest duration Go can hold, and is reported in milliseconds.",

@@ -5,6 +5,7 @@
  *   node scripts/verify.mjs                  # the chassis and every module present
  *   node scripts/verify.mjs go-service web   # the chassis and only the modules named
  *   node scripts/verify.mjs web --no-chassis # one module alone, as its CI job runs it
+ *   node scripts/verify.mjs --no-modules     # the chassis alone, as the chassis CI jobs run it
  *   node scripts/verify.mjs --dry-run        # what would run, one tab-separated line per step
  *
  * The checks are each module's own, from its module.json: the CI job of a module runs this same
@@ -15,18 +16,19 @@
  * Node whose major version differs from .node-version. The exceptions are declared, never guessed: a
  * check whose manifest names a `tool` that is not on PATH, or `requires` a condition this machine lacks
  * (Go's race detector needs cgo and a C compiler), is reported as SKIPPED by name, and the module's CI
- * job, which has both, always runs it.
+ * job, which has both, always runs it: in GitHub Actions a skip is a failure, so a job that lost a tool
+ * cannot pass without running the check.
  *
  * Exit 0 everything passed · 1 something failed · 2 a module name that is unknown or not present.
  */
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
-import { available, checkNodeVersion, e2ePartner, ModuleError, presentModules, REQUIREMENTS, ROOT, run, TOOLCHAINS } from "./modules.mjs";
+import { available, checkNodeVersion, e2ePartner, ModuleError, presentModules, REQUIREMENTS, ROOT, run, skipOutcome, TOOLCHAINS } from "./modules.mjs";
 
 const { values: flags, positionals: requested } = parseArgs({
   allowPositionals: true,
-  options: { "no-chassis": { type: "boolean" }, "dry-run": { type: "boolean" } },
+  options: { "no-chassis": { type: "boolean" }, "no-modules": { type: "boolean" }, "dry-run": { type: "boolean" } },
 });
 
 const results = [];
@@ -53,16 +55,18 @@ function chassis() {
   step("chassis: tests", ["node", "--test", ...suites]);
 }
 
+const elsewhere = (module) => (skipOutcome() === "fail" ? "this CI job must run it" : `the ${module.id} CI job runs it`);
+
 /** Runs one check from a module's manifest, as the manifest says: its command, and when it may be skipped. */
 function check(module, cwd, spec) {
   const name = `${module.id}: ${spec.name}`;
   if (spec.requires !== undefined && !flags["dry-run"] && !REQUIREMENTS[spec.requires](cwd)) {
     if (spec.otherwise) step(`${module.id}: ${spec.otherwise.name}`, spec.otherwise.run, cwd);
-    record(name, "skipped", `needs ${spec.requires}; the ${module.id} CI job runs it`);
+    record(name, skipOutcome(), `needs ${spec.requires}; ${elsewhere(module)}`);
     return;
   }
   if (spec.tool !== undefined && !flags["dry-run"] && !available(spec.tool, ["--version"])) {
-    record(name, "skipped", `${spec.tool} is not on PATH; the ${module.id} CI job runs it`);
+    record(name, skipOutcome(), `${spec.tool} is not on PATH; ${elsewhere(module)}`);
     return;
   }
   if (spec.expect === "no-output" && !flags["dry-run"]) {
@@ -115,7 +119,7 @@ if (absent.length > 0) {
 }
 
 if (!flags["no-chassis"]) chassis();
-for (const module of present) {
+for (const module of flags["no-modules"] ? [] : present) {
   if (requested.length === 0 || requested.includes(module.id)) verifyModule(module);
 }
 

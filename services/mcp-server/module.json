@@ -5,5 +5,5 @@
   "coverage": { "run": [["npm", "run", "--silent", "coverage"]], "report": "coverage/lcov.info" },
   "facts": { "run": ["npm", "run", "--silent", "facts"], "keys": ["statuses", "transitions", "maxTitleLength", "apiDefaultPort"] },
   "e2e": { "run": ["npm", "run", "--silent", "e2e", "--", "{taskApi}"] },
-  "image": "mcp"
+  "image": { "run": ["npm", "run", "--silent", "probe", "--", "{version}", "--", "docker", "run", "--rm", "-i", "{image}"] }
 }

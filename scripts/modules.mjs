@@ -60,9 +60,19 @@ export const REQUIREMENTS = {
  * a module's copy with it; test/check-facts.test.mjs holds this list to the facts those files state.
  */
 export const FACTS = ["statuses", "transitions", "maxTitleLength", "apiDefaultPort"];
-export const IMAGE_PROBES = ["http", "mcp"];
+/**
+ * How a module's container image is probed in CI (scripts/probe-image.mjs): "http" serves the task API
+ * and is held to the contract, or {"run": command} probes the image with the module's own command.
+ */
+export const IMAGE_PROBES = ["http"];
 
 export class ModuleError extends Error {}
+
+/**
+ * What a declared skip is: skipped on a machine that lacks the tool or condition, and a failure in
+ * GitHub Actions, where the module's job always has it, so a job that lost it cannot pass unchecked.
+ */
+export const skipOutcome = (env = process.env) => (env.GITHUB_ACTIONS === "true" ? "fail" : "skipped");
 
 const isCommand = (value) => Array.isArray(value) && value.length > 0 && value.every((part) => typeof part === "string" && part !== "");
 const isObject = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
@@ -122,7 +132,17 @@ export function validateManifest(manifest, where = MANIFEST) {
     if (!isObject(e2e) || !isCommand(e2e.run) || unknownKeys(e2e, ["run"]).length > 0) say("`e2e` is {\"run\": command}");
     else if (!e2e.run.some((part) => part.includes("{taskApi}"))) say("`e2e.run` must pass the task API's address as {taskApi}");
   }
-  if (manifest.image !== undefined && !IMAGE_PROBES.includes(manifest.image)) say(`\`image\` must be one of ${IMAGE_PROBES.join(", ")}`);
+  if (manifest.image !== undefined) {
+    const { image } = manifest;
+    if (typeof image === "string") {
+      if (!IMAGE_PROBES.includes(image)) say(`\`image\` must be one of ${IMAGE_PROBES.join(", ")}, or {"run": command}`);
+      else if (image === "http" && manifest.taskApi === undefined) say("`image: \"http\"` probes the task API, which needs `taskApi`");
+    } else if (!isObject(image) || !isCommand(image.run) || unknownKeys(image, ["run"]).length > 0) {
+      say(`\`image\` must be one of ${IMAGE_PROBES.join(", ")}, or {"run": command}`);
+    } else if (!image.run.some((part) => part.includes("{image}"))) {
+      say("`image.run` must name the image it probes as {image}");
+    }
+  }
   return problems;
 }
 
@@ -234,6 +254,25 @@ export function toolchainNeeds(modules) {
   return lines;
 }
 
+/**
+ * What one module's CI job needs, as .github/actions/module reads it: the toolchains of the module and of
+ * the task service its end-to-end check runs against, the tools for those toolchains, the modules to
+ * install, and which of the job's steps apply.
+ */
+export function jobNeeds(module, modules) {
+  const partner = module.e2e ? e2ePartner(module, modules) : null;
+  const installed = partner ? [module, partner] : [module];
+  return [
+    ...toolchainNeeds(installed),
+    `toolchains=${[...new Set(installed.map((m) => m.toolchain))].join(",")}`,
+    `modules=${installed.map((m) => m.id).join(" ")}`,
+    `dir=${module.dir}`,
+    `audit=${module.toolchain === "node"}`,
+    `coverage=${module.coverage !== undefined}`,
+    `image=${module.image !== undefined}`,
+  ];
+}
+
 function main(argv) {
   const [verb, ...rest] = argv;
   const github = rest.includes("--github-output");
@@ -244,7 +283,9 @@ function main(argv) {
   let lines;
   if (verb === "list") lines = modules.map((m) => `${m.id}\t${m.dir}\t${m.toolchain}`);
   else if (verb === "toolchains") lines = toolchainNeeds(modules);
-  else throw new ModuleError(`unknown command "${verb ?? ""}": use list or toolchains`);
+  else if (verb === "job" && modules.length === 1 && ids.length === 1) lines = jobNeeds(modules[0], presentModules());
+  else if (verb === "job") throw new ModuleError("job takes one module id");
+  else throw new ModuleError(`unknown command "${verb ?? ""}": use list, toolchains or job`);
   if (github && process.env.GITHUB_OUTPUT) appendFileSync(process.env.GITHUB_OUTPUT, `${lines.join("\n")}\n`);
   console.log(lines.join("\n"));
 }

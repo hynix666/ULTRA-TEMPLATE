@@ -1,0 +1,70 @@
+# One module's CI job, from its module.json, the way scripts/verify.mjs verifies it locally. A module's
+# job is its checkout and this action, so adding a module needs a job of its name and nothing else, and
+# the checks CI runs are the ones local verify runs, by construction (ADR-0014).
+#
+# It sets up the toolchains the module needs, and those of the task service its end-to-end check runs
+# against (scripts/modules.mjs job), installs the pinned tools for those toolchains and then the modules,
+# checks the registry signature of every npm package the module installed, runs verify.mjs for it, and
+# then reports its coverage and probes its container image where its manifest names them.
+name: Verify a module
+description: Set up, install and verify one module from its module.json, report its coverage and probe its image.
+inputs:
+  id:
+    description: The module's id, as its module.json names it.
+    required: true
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      with:
+        node-version-file: .node-version
+    - name: What this module needs
+      id: needs
+      shell: bash
+      env:
+        ID: ${{ inputs.id }}
+      run: |
+        node scripts/modules.mjs job "$ID" --github-output
+        echo "uv=$(node scripts/tools.mjs version uv)" >> "$GITHUB_OUTPUT"
+    - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      if: steps.needs.outputs.go == 'true'
+      with:
+        go-version-file: ${{ steps.needs.outputs.go-version-file }}
+        cache-dependency-path: ${{ steps.needs.outputs.go-version-file }}
+    - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+      if: steps.needs.outputs.python == 'true'
+      with:
+        version: ${{ steps.needs.outputs.uv }}
+    - name: The pinned tools its checks run
+      shell: bash
+      env:
+        TOOLCHAINS: ${{ steps.needs.outputs.toolchains }}
+      run: node scripts/tools.mjs install --for "$TOOLCHAINS"
+    - name: Install
+      shell: bash
+      env:
+        MODULES: ${{ steps.needs.outputs.modules }}
+      # One argument per module id, so the word splitting is intended.
+      run: node scripts/setup.mjs $MODULES
+    - name: Every installed npm package carries its registry signature
+      if: steps.needs.outputs.audit == 'true'
+      shell: bash
+      working-directory: ${{ steps.needs.outputs.dir }}
+      run: npm audit signatures
+    - name: Verify
+      shell: bash
+      env:
+        ID: ${{ inputs.id }}
+      run: node scripts/verify.mjs "$ID" --no-chassis
+    - name: Coverage (report-only, never a gate)
+      if: steps.needs.outputs.coverage == 'true'
+      shell: bash
+      env:
+        ID: ${{ inputs.id }}
+      run: node scripts/coverage-summary.mjs --run "$ID" >> "$GITHUB_STEP_SUMMARY"
+    - name: Container image
+      if: steps.needs.outputs.image == 'true'
+      shell: bash
+      env:
+        ID: ${{ inputs.id }}
+      run: node scripts/probe-image.mjs "$ID"

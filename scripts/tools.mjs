@@ -7,6 +7,7 @@
  *
  *   node scripts/tools.mjs install actionlint zizmor   # download, check the SHA-256, unpack onto PATH
  *   node scripts/tools.mjs install --local             # what this checkout's modules need and PATH lacks
+ *   node scripts/tools.mjs install --for go,python     # the tools of these toolchains (a module's CI job)
  *   node scripts/tools.mjs version uv                  # print a pinned version
  *   node scripts/tools.mjs run govulncheck -- ./...    # run a tool the manifest runs by version
  *   node scripts/tools.mjs check golangci-lint         # is the one on PATH the pinned one?
@@ -151,6 +152,12 @@ export function localPlan(names, { tools = loadTools(), on = platform(), found =
   return { install, skipped };
 }
 
+/** The tools that the modules of these toolchains run, and nothing for the chassis or for CI alone. */
+export const toolsFor = (toolchains, tools = loadTools()) =>
+  Object.entries(tools)
+    .filter(([, tool]) => tool.platforms && toolchains.includes(tool.for))
+    .map(([name]) => name);
+
 /** The tools a checkout needs locally: the chassis's, and those of every toolchain a module here uses. */
 export function localTools(toolchains, tools = loadTools()) {
   return Object.entries(tools)
@@ -241,8 +248,12 @@ async function main(argv) {
   if (problems.length > 0) throw new ToolError(`scripts/tools/tools.json is malformed:\n  ${problems.join("\n  ")}`);
   if (verb === "install") {
     const dirAt = rest.indexOf("--dir");
+    const forAt = rest.indexOf("--for");
     const dir = dirAt === -1 ? defaultDir() : resolve(rest[dirAt + 1]);
-    let names = rest.filter((arg, i) => !arg.startsWith("--") && (dirAt === -1 || i !== dirAt + 1));
+    const valueAt = new Set([dirAt, forAt].filter((at) => at !== -1).map((at) => at + 1));
+    let names = rest.filter((arg, i) => !arg.startsWith("--") && !valueAt.has(i));
+    const toolchains = forAt === -1 ? null : (rest[forAt + 1] ?? "").split(",").filter(Boolean);
+    if (toolchains) names = [...names, ...toolsFor(toolchains, tools)];
     const local = rest.includes("--local");
     if (local) {
       const { presentModules } = await import("./modules.mjs");
@@ -250,7 +261,7 @@ async function main(argv) {
       for (const line of plan.skipped) console.log(`tools: skipped ${line}.`);
       names = [...names, ...plan.install];
     }
-    if (names.length === 0 && !local) throw new ToolError("name a tool to install, or pass --local");
+    if (names.length === 0 && !local && !toolchains) throw new ToolError("name a tool to install, or pass --local or --for");
     for (const name of names) {
       for (const path of await install(name, { tools, dir })) console.log(`tools: installed ${name} ${tools[name].version} at ${path}`);
     }

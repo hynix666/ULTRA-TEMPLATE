@@ -7,7 +7,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { bump, command, install, loadTools, localPlan, localTools, platform, validateTools } from "../scripts/tools.mjs";
+import { bump, command, install, loadTools, localPlan, localTools, platform, toolsFor, validateTools } from "../scripts/tools.mjs";
 
 /** A tar.gz holding one executable, its bytes, and a fetch that serves it at `url`. */
 function release(t, url, member = "demo") {
@@ -108,4 +108,12 @@ test("a local install leaves a tool already at its pin alone, and names one this
   assert.deepEqual(plan({ demo: "1.2.3" }).install, []);
   assert.match(plan({ demo: "1.2.3" }).skipped.join(), /demo 1\.2\.3 is already on PATH/);
   assert.deepEqual(plan({ demo: "1.2.2" }).install, ["demo"], "a different version on PATH is replaced by the pinned one");
+});
+
+test("a module's CI job installs the tools of its toolchains, and neither the chassis's nor CI-only ones", () => {
+  const tools = loadTools();
+  const go = toolsFor(["go"], tools);
+  assert.ok(go.length > 0 && go.every((name) => tools[name].for === "go"));
+  assert.deepEqual(toolsFor([], tools), []);
+  assert.deepEqual(toolsFor(["chassis", "ci"], tools).filter((name) => !tools[name].platforms), []);
 });

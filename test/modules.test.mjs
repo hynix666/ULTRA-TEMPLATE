@@ -91,3 +91,31 @@ test("verify runs a client's end-to-end check when a task service is present", a
     assert.equal(plan.includes(step), partner !== null, module.id);
   }
 });
+
+test("a declared skip is a failure in GitHub Actions, where the module's job has what it needs", async () => {
+  const { skipOutcome } = await import("../scripts/modules.mjs");
+  assert.equal(skipOutcome({}), "skipped");
+  assert.equal(skipOutcome({ GITHUB_ACTIONS: "true" }), "fail");
+});
+
+test("an image is probed through the contract or by the module's own command, which names the image", async () => {
+  const { validateManifest } = await import("../scripts/modules.mjs");
+  const base = { id: "m", toolchain: "node", checks: [{ name: "t", run: ["npm", "test"] }] };
+  assert.deepEqual(validateManifest({ ...base, taskApi: { run: ["node", "main.ts"] }, image: "http" }), []);
+  assert.match(validateManifest({ ...base, image: "http" }).join(), /probes the task API, which needs `taskApi`/);
+  assert.deepEqual(validateManifest({ ...base, image: { run: ["npm", "run", "probe", "--", "{image}"] } }), []);
+  assert.match(validateManifest({ ...base, image: { run: ["npm", "run", "probe"] } }).join(), /must name the image it probes as \{image\}/);
+  assert.match(validateManifest({ ...base, image: "mcp" }).join(), /`image` must be one of http, or \{"run": command\}/);
+});
+
+test("a module's CI job sets up and installs what its checks and its end-to-end partner need", async () => {
+  const { jobNeeds } = await import("../scripts/modules.mjs");
+  const go = { id: "go", dir: "svc/go", toolchain: "go", checks: [], taskApi: { run: ["api"] }, image: "http", coverage: { run: [], report: "c" } };
+  const ts = { id: "ts", dir: "svc/ts", toolchain: "node", checks: [], taskApi: { run: ["node"] } };
+  const client = { id: "client", dir: "svc/client", toolchain: "node", checks: [], e2e: { run: ["x", "{taskApi}"] } };
+  const needs = (module, modules) => Object.fromEntries(jobNeeds(module, modules).map((line) => line.split("=")));
+  assert.deepEqual(needs(go, [go, ts, client]), { node: "false", go: "true", python: "false", "go-version-file": "svc/go/go.mod", toolchains: "go", modules: "go", dir: "svc/go", audit: "false", coverage: "true", image: "true" });
+  assert.equal(needs(client, [go, ts, client]).modules, "client ts", "a partner on its own toolchain first");
+  assert.equal(needs(client, [go, client]).toolchains, "node,go", "and the partner's toolchain when it is another");
+  assert.equal(needs(client, [client]).modules, "client");
+});
