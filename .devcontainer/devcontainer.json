@@ -1,19 +1,24 @@
 {
   "name": "ultra-template",
-  // A general base image; each toolchain is a Dev Container Feature pinned to a version, which
-  // Dependabot's devcontainers updater keeps current.
+  // A general base image; each toolchain is a Dev Container Feature at the version its own file
+  // declares (.node-version, go.mod, .python-version), which check-hygiene rule 17 holds them to.
+  // Dependabot's devcontainers updater keeps the features themselves current.
   "image": "mcr.microsoft.com/devcontainers/base:ubuntu-24.04",
   "features": {
     // ultra:begin go-service
-    "ghcr.io/devcontainers/features/go:1": { "version": "1.26" },
+    // The go feature always installs golangci-lint, so it is told the version scripts/tools/tools.json pins.
+    "ghcr.io/devcontainers/features/go:1": { "version": "1.26", "golangciLintVersion": "2.13.2" },
     // ultra:end go-service
     // ultra:begin py-service
-    "ghcr.io/devcontainers/features/python:1": { "version": "3.14", "toolsToInstall": "uv" },
+    // The feature's own tool list installs whatever is newest; uv comes from scripts/tools/tools.json instead.
+    "ghcr.io/devcontainers/features/python:1": { "version": "3.14", "installTools": false },
     // ultra:end py-service
     "ghcr.io/devcontainers/features/github-cli:1": {},
     "ghcr.io/devcontainers/features/node:2": { "version": "24" }
   },
-  "postCreateCommand": "node scripts/setup.mjs",
+  // The tools scripts/tools/tools.json pins are installed here, checksum-verified, ahead of anything else.
+  "remoteEnv": { "PATH": "${containerWorkspaceFolder}/.tools/bin:${containerEnv:PATH}" },
+  "postCreateCommand": "node scripts/tools.mjs install --local && node scripts/setup.mjs",
   "customizations": {
     "vscode": {
       "extensions": [

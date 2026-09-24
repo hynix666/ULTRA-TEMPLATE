@@ -6,7 +6,7 @@
  * everything that needs one reads it from there: the workflows, local checks and the agent environment.
  *
  *   node scripts/tools.mjs install actionlint zizmor   # download, check the SHA-256, unpack onto PATH
- *   node scripts/tools.mjs install --local             # every tool this checkout's modules need locally
+ *   node scripts/tools.mjs install --local             # what this checkout's modules need and PATH lacks
  *   node scripts/tools.mjs version uv                  # print a pinned version
  *   node scripts/tools.mjs run govulncheck -- ./...    # run a tool the manifest runs by version
  *   node scripts/tools.mjs check golangci-lint         # is the one on PATH the pinned one?
@@ -22,11 +22,13 @@ import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync, appendFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { basename, dirname, join, resolve } from "node:path";
+import { basename, delimiter, dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-export const TOOLS_FILE = join(ROOT, "scripts", "tools", "tools.json");
+/** The manifest, relative to the repository root, as git lists it. */
+export const TOOLS_PATH = "scripts/tools/tools.json";
+export const TOOLS_FILE = join(ROOT, ...TOOLS_PATH.split("/"));
 /** Where a tool may be needed: everywhere, where a module of a toolchain is present, or only in CI. */
 export const PLACES = ["chassis", "go", "node", "python", "ci"];
 
@@ -53,6 +55,12 @@ export function validateTools(tools) {
     }
     if ("platforms" in tool && !["file", "sidecar", "githubDigest"].some((key) => key in (tool.checksums ?? {}))) {
       say("`checksums` must say where the release publishes its checksum: file, sidecar or githubDigest");
+    }
+    for (const [feature, option] of Object.entries(tool.devcontainer ?? {})) {
+      if (typeof option !== "string" || option === "") say(`\`devcontainer.${feature}\` names the Dev Container feature option that sets this tool's version`);
+    }
+    if ("sidecar" in (tool.checksums ?? {}) && !/^\.[\w.]+$/.test(tool.checksums.sidecar)) {
+      say("`checksums.sidecar` is the suffix the release appends to each asset's URL, such as .sha256");
     }
   }
   return problems;
@@ -126,6 +134,23 @@ export function installedVersion(name, tools = loadTools()) {
   return /(\d+\.\d+\.\d+)/.exec(`${out.stdout}${out.stderr}`)?.[1] ?? null;
 }
 
+/**
+ * Which of `names` to install on this machine. A tool already on PATH at its pinned version is left
+ * alone, and one with no pinned asset for this platform is reported instead of failing the rest: `--local`
+ * sets a machine up as far as the manifest can, and verify names whatever is still missing.
+ */
+export function localPlan(names, { tools = loadTools(), on = platform(), found = (name) => installedVersion(name, tools) } = {}) {
+  const install = [];
+  const skipped = [];
+  for (const name of names) {
+    const { version, platforms } = need(tools, name);
+    if (found(name) === version) skipped.push(`${name} ${version} is already on PATH`);
+    else if (!platforms?.[on]) skipped.push(`${name} has no pinned asset for ${on}: install ${version} yourself, or add the asset to scripts/tools/tools.json`);
+    else install.push(name);
+  }
+  return { install, skipped };
+}
+
 /** The tools a checkout needs locally: the chassis's, and those of every toolchain a module here uses. */
 export function localTools(toolchains, tools = loadTools()) {
   return Object.entries(tools)
@@ -176,7 +201,7 @@ async function publishedChecksum(tool, asset, { fetch, token }) {
     if (!line) throw new ToolError(`the release's checksums file does not list ${file}`);
     return line.trim().split(/\s+/)[0];
   }
-  if (tool.checksums.sidecar) return (await text(fill(tool.checksums.sidecar, tool))).trim().split(/\s+/)[0];
+  if (tool.checksums.sidecar) return (await text(`${url}${tool.checksums.sidecar}`)).trim().split(/\s+/)[0];
   const tag = fill(tool.releases.tag ?? "v{version}", tool);
   const response = await fetch(`https://api.github.com/repos/${tool.releases.github}/releases/tags/${tag}`, {
     headers: { accept: "application/vnd.github+json", ...(token ? { authorization: `Bearer ${token}` } : {}) },
@@ -218,15 +243,19 @@ async function main(argv) {
     const dirAt = rest.indexOf("--dir");
     const dir = dirAt === -1 ? defaultDir() : resolve(rest[dirAt + 1]);
     let names = rest.filter((arg, i) => !arg.startsWith("--") && (dirAt === -1 || i !== dirAt + 1));
-    if (rest.includes("--local")) {
+    const local = rest.includes("--local");
+    if (local) {
       const { presentModules } = await import("./modules.mjs");
-      names = [...names, ...localTools([...new Set(presentModules().map((m) => m.toolchain))], tools)];
+      const plan = localPlan(localTools([...new Set(presentModules().map((m) => m.toolchain))], tools), { tools });
+      for (const line of plan.skipped) console.log(`tools: skipped ${line}.`);
+      names = [...names, ...plan.install];
     }
-    if (names.length === 0) throw new ToolError("name a tool to install, or pass --local");
+    if (names.length === 0 && !local) throw new ToolError("name a tool to install, or pass --local");
     for (const name of names) {
       for (const path of await install(name, { tools, dir })) console.log(`tools: installed ${name} ${tools[name].version} at ${path}`);
     }
     if (process.env.GITHUB_PATH) appendFileSync(process.env.GITHUB_PATH, `${dir}\n`);
+    else if (names.length > 0 && !(process.env.PATH ?? "").split(delimiter).includes(dir)) console.log(`tools: put ${dir} on PATH to use them.`);
     return 0;
   }
   if (verb === "version") {

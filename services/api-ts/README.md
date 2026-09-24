@@ -1,6 +1,6 @@
 # api-ts
 
-The task HTTP service in TypeScript, with the same API, status codes and configuration as `api-go`. Node 24 runs the `.ts` sources directly, so there is no build step and no runtime dependency.
+The task HTTP service in TypeScript, with the same API, status codes and configuration as `api-go`. Node runs the `.ts` sources directly, so there is no build step and no runtime dependency.
 
 ```text
 src/domain/        pure rules over plain data — no I/O, clock, randomness or packages

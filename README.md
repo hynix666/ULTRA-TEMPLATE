@@ -10,7 +10,7 @@
 It is for anyone starting a service, a web app, a library or an MCP server who wants those checks in place from the first commit, not added after something breaks.
 
 - **One gate.** `node scripts/verify.mjs` runs every module's checks as CI does, and CI reports a single required check, `verify`.
-- **A pinned supply chain the build enforces.** Actions pinned to commit SHAs, checksum-verified downloads, digest-pinned images, and npm installs that run no dependency's install scripts, with every package's registry signature verified. A weekly report names the hand-pinned tools that have a newer release, and the published MCP image carries a build provenance attestation.
+- **A pinned supply chain the build enforces.** Actions pinned to commit SHAs, checksum-verified downloads, digest-pinned images, and npm installs that run no dependency's install scripts, with every package's registry signature verified. Every hand-pinned tool is written once, with its checksum, and every copy of a toolchain version is held to the file that declares it. A weekly report names the hand-pinned tools that have a newer release, and the published MCP image carries a build provenance attestation.
 - **Repository hygiene checks.** A tracked `.env`, a vendored `node_modules`, a truncated `.gitignore`, a file over 4 MB, a module missing its lockfile, a CI job left out of the gate, an invisible character hiding text from reviewers, or a path into someone's home directory each fail the build.
 - **Clean Architecture services whose layer rules are tests**, in Go, TypeScript and Python — the same structure proved in three toolchains, and the same API proved by one contract every service is started and checked against: every move between statuses, a request id and one log line per request, and an OpenAPI description held to the same cases.
 - **One statement of the rules.** The statuses and legal moves are written once, and every module that repeats them, the MCP server, the web app and the library included, is checked against that statement.
@@ -66,7 +66,7 @@ It is for anyone starting a service, a web app, a library or an MCP server who w
 | Feature | What you get |
 |---|---|
 | `go-service` | Go HTTP service in Clean Architecture layers, standard library only; a test enforces the layer rules; golangci-lint; distroless image |
-| `ts-service` | TypeScript HTTP service run directly by Node 24; pure domain core; import boundaries checked on every file; no runtime dependencies |
+| `ts-service` | TypeScript HTTP service run directly by Node; pure domain core; import boundaries checked on every file; no runtime dependencies |
 | `mcp-server` | MCP server on the official SDK: task tools over stdio for an AI assistant, same layers, driven in tests by a real client |
 | `py-service` | Python HTTP service on the standard library: pure domain, WSGI transport, ruff and strict mypy, layer rules enforced by an `ast`-based check |
 | `web` | React + Vite app organised by feature (bulletproof-react), import boundaries checked on every file, unit and component tests |

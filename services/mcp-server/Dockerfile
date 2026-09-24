@@ -8,7 +8,7 @@ COPY package.json package-lock.json ./
 # with Node carries its own dependencies, with vulnerabilities of their own.
 RUN npm ci --omit=dev --ignore-scripts \
     && rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx
-# Node 24 runs TypeScript directly by stripping types, so the sources ship as they are.
+# Node runs TypeScript directly by stripping types, so the sources ship as they are.
 COPY src ./src
 USER node
 # The MCP Registry verifies that whoever publishes server.json owns this image by reading this label;

@@ -7,7 +7,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { bump, command, install, loadTools, localTools, platform, validateTools } from "../scripts/tools.mjs";
+import { bump, command, install, loadTools, localPlan, localTools, platform, validateTools } from "../scripts/tools.mjs";
 
 /** A tar.gz holding one executable, its bytes, and a fetch that serves it at `url`. */
 function release(t, url, member = "demo") {
@@ -86,4 +86,26 @@ test("bump takes the new checksum from the release, never from anyone's copy", a
   assert.equal(next.demo.version, "2.0.0");
   assert.equal(next.demo.platforms[platform()].sha256, sha);
   await assert.rejects(() => bump("demo", "2.0.1", { tools, fetch }), /answered 404/);
+});
+
+test("bump reads a sidecar checksum beside each platform's own asset", async () => {
+  const sha = "d".repeat(64);
+  const tools = tool("https://example.test/v{version}/demo.tar.gz", "a".repeat(64), { checksums: { sidecar: ".sha256" } });
+  const fetch = async (address) =>
+    address === "https://example.test/v2.0.0/demo.tar.gz.sha256" ? new Response(`${sha}  demo.tar.gz\n`) : new Response("", { status: 404 });
+  assert.equal((await bump("demo", "2.0.0", { tools, fetch })).demo.platforms[platform()].sha256, sha);
+  assert.match(validateTools(tool("https://example.test/x.tar.gz", "a".repeat(64), { checksums: { sidecar: "https://example.test/x.sha256" } })).join(), /`checksums.sidecar` is the suffix/);
+});
+
+test("a local install leaves a tool already at its pin alone, and names one this platform has no asset for", () => {
+  const tools = {
+    ...tool("https://example.test/demo.tar.gz", "a".repeat(64)),
+    other: { ...tool("https://example.test/other.tar.gz", "a".repeat(64)).demo, platforms: { "plan9-mips": { url: "https://example.test/o", sha256: "a".repeat(64), files: ["o"] } } },
+  };
+  const plan = (versions) => localPlan(["demo", "other"], { tools, on: platform(), found: (name) => versions[name] ?? null });
+  assert.deepEqual(plan({}).install, ["demo"]);
+  assert.match(plan({}).skipped.join(), new RegExp(`other has no pinned asset for ${platform()}: install 1\\.2\\.3 yourself`));
+  assert.deepEqual(plan({ demo: "1.2.3" }).install, []);
+  assert.match(plan({ demo: "1.2.3" }).skipped.join(), /demo 1\.2\.3 is already on PATH/);
+  assert.deepEqual(plan({ demo: "1.2.2" }).install, ["demo"], "a different version on PATH is replaced by the pinned one");
 });

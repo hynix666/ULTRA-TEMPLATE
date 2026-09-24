@@ -28,7 +28,7 @@ model {
 
     // ultra:begin ts-service
     apiTs = service 'api-ts' {
-      technology 'TypeScript, Node 24'
+      technology 'TypeScript, Node'
       description 'Task HTTP API with a pure domain core; import boundaries checked on every file.'
       link ../../services/api-ts/README.md 'README'
     }
@@ -37,7 +37,7 @@ model {
 
     // ultra:begin py-service
     apiPy = service 'api-py' {
-      technology 'Python 3.13, WSGI'
+      technology 'Python, WSGI'
       description 'Task HTTP API on the standard library; layer rules enforced by an ast-based check.'
       link ../../services/api-py/README.md 'README'
     }

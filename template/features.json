@@ -14,7 +14,7 @@
       "paths": ["services/api-go", ".claude/skills/add-endpoint-go", "scripts/check-contract.mjs", "scripts/contract", "test/check-contract.test.mjs", "scripts/rules"]
     },
     "ts-service": {
-      "summary": "TypeScript HTTP service on Node 24: pure domain core, import boundaries checked on every file",
+      "summary": "TypeScript HTTP service run directly by Node: pure domain core, import boundaries checked on every file",
       "describes": "a TypeScript task API",
       "paths": ["services/api-ts", ".claude/skills/add-endpoint-ts", "scripts/check-contract.mjs", "scripts/contract", "test/check-contract.test.mjs", "scripts/rules"]
     },
