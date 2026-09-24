@@ -55,7 +55,7 @@ export const MAX_TRACKED_BYTES = 4 * 1024 * 1024;
 export const JSONC = /(^|\/)(tsconfig(\.[\w-]+)?\.json|devcontainer\.json)$|(^|\/)\.vscode\//;
 export const MARKER = /ultra:(?:begin|end)\s+[a-z0-9-]+/;
 
-const TEXT_SOURCE = /\.(mjs|cjs|js|jsx|ts|tsx|mts|go|py|toml|sh|ya?ml|json|md|c4|css|html)$/;
+const TEXT_SOURCE = /\.(mjs|cjs|js|jsx|ts|tsx|mts|go|py|toml|sh|ya?ml|jsonc?|md|c4|css|html)$/;
 // Tab, LF and CR are the only C0 characters text needs; anything else belongs in an escape.
 const CONTROL_CHAR = /[\x00-\x08\x0B\x0C\x0E-\x1F]/;
 // Characters that render as nothing, or reorder what is shown, while a program — or an agent — still

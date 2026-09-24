@@ -8,11 +8,11 @@ import { createHandler, type Log } from "./adapters/http.ts";
 import { MemoryTaskRepository } from "./adapters/memory-task-repository.ts";
 import { withRequestLog } from "./adapters/request-log.ts";
 import { TaskService } from "./application/task-service.ts";
-import { ConfigError, loadConfig } from "./config.ts";
+import { type Config, ConfigError, loadConfig } from "./config.ts";
 
 const log: Log = (entry) => console.log(JSON.stringify({ time: new Date().toISOString(), ...entry }));
 
-let config;
+let config: Config;
 try {
   config = loadConfig(process.env);
 } catch (err) {

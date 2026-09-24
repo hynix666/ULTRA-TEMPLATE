@@ -9,14 +9,24 @@ export function TaskBoard() {
 
   function run(action: () => Promise<void>): void {
     setError(null);
-    action().catch((err: unknown) => setError(err instanceof Error ? err.message : String(err)));
+    action().catch((err: unknown) => setError(message(err)));
   }
 
   async function refresh(): Promise<void> {
     setTasks(await listTasks());
   }
 
-  useEffect(() => run(refresh), []);
+  // The first load depends on nothing that changes between renders, so it runs once. An answer that
+  // arrives after the board is gone is dropped rather than set on an unmounted component.
+  useEffect(() => {
+    let current = true;
+    listTasks()
+      .then((loaded) => current && setTasks(loaded))
+      .catch((err: unknown) => current && setError(message(err)));
+    return () => {
+      current = false;
+    };
+  }, []);
 
   function create(event: FormEvent): void {
     event.preventDefault();
@@ -65,3 +75,5 @@ export function TaskBoard() {
     </section>
   );
 }
+
+const message = (err: unknown): string => (err instanceof Error ? err.message : String(err));

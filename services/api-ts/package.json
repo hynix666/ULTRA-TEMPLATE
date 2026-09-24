@@ -10,9 +10,11 @@
     "check:boundaries": "node scripts/check-boundaries.mjs",
     "typecheck": "tsc --noEmit",
     "test": "node --test \"test/**/*.test.ts\"",
-    "verify": "npm run check:boundaries && npm run typecheck && npm test"
+    "lint": "biome ci .",
+    "verify": "npm run lint && npm run check:boundaries && npm run typecheck && npm test"
   },
   "devDependencies": {
+    "@biomejs/biome": "2.5.14",
     "@types/node": "^24.13.5",
     "typescript": "^7.0.2"
   }

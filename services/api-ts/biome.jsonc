@@ -1,0 +1,39 @@
+{
+  // Biome lints and formats this module's JavaScript and TypeScript (ADR-0012). JSON is left alone:
+  // npm rewrites package.json in its own layout, and a formatter that disagreed would flip it back and
+  // forth on every install.
+  "$schema": "./node_modules/@biomejs/biome/configuration_schema.json",
+  "files": {
+    "includes": ["**/*.ts", "**/*.tsx", "**/*.mjs", "**/*.js", "!**/node_modules", "!**/dist", "!**/coverage"]
+  },
+  // The style the code was already written in, so adopting the formatter changed layout and nothing else.
+  "formatter": {
+    "indentStyle": "space",
+    "indentWidth": 2,
+    "lineWidth": 140
+  },
+  "javascript": {
+    "formatter": {
+      "quoteStyle": "double",
+      "semicolons": "always",
+      "trailingCommas": "all",
+      "arrowParentheses": "always",
+      "quoteProperties": "preserve"
+    }
+  },
+  "linter": {
+    "enabled": true,
+    "rules": {
+      "preset": "recommended",
+      "complexity": {
+        // `env["PORT"]` on an index-signature record says the value may be missing, which `env.PORT`
+        // hides; the bracket form is the one noPropertyAccessFromIndexSignature asks for.
+        "useLiteralKeys": "off"
+      }
+    }
+  },
+  // Sorting imports is a rewrite of every file for no defect found; left to review.
+  "assist": {
+    "enabled": false
+  }
+}

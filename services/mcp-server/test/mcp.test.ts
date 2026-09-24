@@ -69,9 +69,9 @@ test("every result carries structured content that says what the text says", asy
     nextStatuses: ["in_progress"],
   });
   const moved = structured(await client.callTool({ name: "move_task", arguments: { id: "t1", status: "in_progress" } }));
-  assert.deepEqual((moved?.["task"] as { nextStatuses?: string[] }).nextStatuses, ["todo", "done"]);
+  assert.deepEqual((moved?.["task"] as { nextStatuses?: string[] } | undefined)?.nextStatuses, ["todo", "done"]);
   const listed = structured(await client.callTool({ name: "list_tasks", arguments: {} }));
-  assert.equal((listed?.["tasks"] as unknown[]).length, 1);
+  assert.equal((listed?.["tasks"] as unknown[] | undefined)?.length, 1);
 });
 
 test("get_task answers with one task, and names an unknown id as NOT_FOUND", async (t) => {

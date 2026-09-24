@@ -143,6 +143,7 @@ test("an invisible or text-reordering character fails wherever it hides, and its
     "src/trojan.mjs": "const role = \"user\u202E \u2066// admin\u2069 \u2066\";\n",
     "docs/zero.md": "pass\u200Bword\n",
     "src/escaped.mjs": "const zwsp = \"\\u200B\";\n",
+    "biome.jsonc": "{ // lint\u202E\n}\n",
     "docs/plain.md": "Café, naïve, 日本語 and ✓ are ordinary text.\n",
     // Emoji spelt with a presentation selector, a keycap, a skin tone and joiners are ordinary text too.
     "docs/emoji.md": "\u26A0\uFE0F Read first. Made with \u2764\uFE0F. Step 1\uFE0F\u20E3. \u{1F469}\u{1F3FD}\u200D\u{1F4BB} and \u{1F468}\u200D\u{1F469}\u200D\u{1F467} wrote it.\n",
@@ -150,7 +151,7 @@ test("an invisible or text-reordering character fails wherever it hides, and its
     "docs/stray-selector.md": "admin\uFE0F\n",
     "docs/stray-joiner.md": "pass\u200Dword\n",
   }));
-  assert.match(found, /invisible or text-reordering character\(s\) in AGENTS\.md:3, docs\/stray-joiner\.md:1, docs\/stray-selector\.md:1, docs\/zero\.md:1, src\/trojan\.mjs:1\./);
+  assert.match(found, /invisible or text-reordering character\(s\) in AGENTS\.md:3, biome\.jsonc:1, docs\/stray-joiner\.md:1, docs\/stray-selector\.md:1, docs\/zero\.md:1, src\/trojan\.mjs:1\./);
   assert.doesNotMatch(found, /escaped\.mjs|plain\.md|emoji\.md/);
 });
 
