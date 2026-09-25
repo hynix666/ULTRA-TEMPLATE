@@ -10,16 +10,16 @@
 It is for anyone starting a service, a web app, a library or an MCP server who wants those checks in place from the first commit, not added after something breaks.
 
 - **One gate.** `node scripts/verify.mjs` runs every module's checks as CI does, and CI reports a single required check, `verify`.
-- **A pinned supply chain the build enforces.** Actions pinned to commit SHAs, checksum-verified downloads, digest-pinned images, and npm installs that run no dependency's install scripts, with every package's registry signature verified. A weekly report names the hand-pinned tools that have a newer release, and the published MCP image carries a build provenance attestation.
+- **A pinned supply chain the build enforces.** Actions pinned to commit SHAs, checksum-verified downloads, digest-pinned images, and npm installs that run no dependency's install scripts, with every package's registry signature verified. Every hand-pinned tool is written once, with its checksum, and every copy of a toolchain version is held to the file that declares it. A weekly report names the hand-pinned tools that have a newer release, and the published MCP image carries a build provenance attestation.
 - **Repository hygiene checks.** A tracked `.env`, a vendored `node_modules`, a truncated `.gitignore`, a file over 4 MB, a module missing its lockfile, a CI job left out of the gate, an invisible character hiding text from reviewers, or a path into someone's home directory each fail the build.
-- **Clean Architecture services whose layer rules are tests**, in Go, TypeScript and Python — the same structure proved in three toolchains, and the same API proved by one contract every service is started and checked against: every move between statuses, a request id and one log line per request, and an OpenAPI description held to the same cases.
+- **Clean Architecture services whose layer rules are tests**, in Go, TypeScript and Python — the same structure proved in three toolchains, with nothing below the composition root reading the clock, randomness or the environment, one storage suite a replacement store must pass, and the same API proved by one contract every service is started and checked against: every move between statuses, every limit at its bound, every configuration value it must take or refuse, a request id and one log line per request, and an OpenAPI description held to the same cases.
 - **One statement of the rules.** The statuses and legal moves are written once, and every module that repeats them, the MCP server, the web app and the library included, is checked against that statement.
 - **A feature-sliced web app and a publishable library**, each with its import or packaging rules checked.
 - **An MCP server for agents**, built on the official SDK and tested through a real client, not a mock.
 - **Architecture as code.** A LikeC4 model with rules checked in CI.
 - **One set of instructions for agents.** `AGENTS.md` is the only copy; `CLAUDE.md`, `GEMINI.md` and Copilot's file point at it, and a check fails when one starts saying something else.
 - **Selectable features, tested.** CI generates a project from every preset and runs that project's own checks, and a project can add or remove a feature later with the same three-way merge that brings in template releases.
-- **The same checks everywhere.** Node modules lint and format with Biome as Go and Python modules do with their own tools, local runs refuse a Node other than CI's, the chassis runs on Windows in CI, and every module's coverage is reported without being gated.
+- **The same checks everywhere.** Node modules lint and format with Biome, from one configuration, as Go and Python modules do with their own tools; local runs refuse a Node other than CI's and a pinned tool at another version; CI runs each module's checks from the same `module.json` through the same script; a cloud agent's session gets CI's toolchains before its first command; the chassis runs on Windows in CI; and every module's coverage is reported without being gated.
 
 ## Start a project
 
@@ -30,7 +30,7 @@ It is for anyone starting a service, a web app, a library or an MCP server who w
    node template/init.mjs --list
    ```
 
-3. Initialize. This needs Node 24 and a clean working tree. Run in a terminal, init reads the owner and repository from `origin`, asks for anything else, shows the plan and waits for your confirmation:
+3. Initialize. This needs Node <!-- generated:version .node-version -->24<!-- /generated --> and a clean working tree. Run in a terminal, init reads the owner and repository from `origin`, asks for anything else, shows the plan and waits for your confirmation:
 
    ```bash
    node template/init.mjs
@@ -53,20 +53,23 @@ It is for anyone starting a service, a web app, a library or an MCP server who w
 
 ## Presets and features
 
+<!-- generated:presets-table -->
 | Preset | Features |
 |---|---|
-| `minimal` | none: the chassis only (hygiene, CI, security, community files, ADRs) |
+| `minimal` | none: the chassis only |
 | `go-api` | `go-service`, `architecture`, `release`, `devcontainer` |
 | `py-api` | `py-service`, `architecture`, `release`, `devcontainer` |
 | `fullstack-ts` | `ts-service`, `web`, `architecture`, `release`, `devcontainer` |
 | `library` | `ts-library`, `release`, `devcontainer` |
 | `mcp` | `mcp-server`, `release`, `devcontainer` |
 | `all` | every feature |
+<!-- /generated -->
 
+<!-- generated:features-table -->
 | Feature | What you get |
 |---|---|
 | `go-service` | Go HTTP service in Clean Architecture layers, standard library only; a test enforces the layer rules; golangci-lint; distroless image |
-| `ts-service` | TypeScript HTTP service run directly by Node 24; pure domain core; import boundaries checked on every file; no runtime dependencies |
+| `ts-service` | TypeScript HTTP service run directly by Node; pure domain core; import boundaries checked on every file; no runtime dependencies |
 | `mcp-server` | MCP server on the official SDK: task tools over stdio for an AI assistant, same layers, driven in tests by a real client |
 | `py-service` | Python HTTP service on the standard library: pure domain, WSGI transport, ruff and strict mypy, layer rules enforced by an `ast`-based check |
 | `web` | React + Vite app organised by feature (bulletproof-react), import boundaries checked on every file, unit and component tests |
@@ -74,6 +77,7 @@ It is for anyone starting a service, a web app, a library or an MCP server who w
 | `architecture` | LikeC4 model of the system, with model rules as tests and an opt-in GitHub Pages site |
 | `release` | release-please: release pull requests, tags and `CHANGELOG.md` from Conventional Commits |
 | `devcontainer` | Dev Container with the toolchains of the features you selected |
+<!-- /generated -->
 
 Init deletes the features you did not select, keeps or removes the marked blocks in shared files such as workflows and this README, replaces the template's name and owner with yours, and deletes itself. [template/README.md](template/README.md) explains the mechanism and how to add a feature.
 
@@ -92,12 +96,12 @@ Deployment targets and infrastructure, databases and migrations, authentication,
 
 You need:
 
-- Node 24 (`.node-version`), for the scripts and every Node module.
+- Node <!-- generated:version .node-version -->24<!-- /generated --> (`.node-version`), for the scripts and every Node module.
 <!-- ultra:begin go-service -->
-- Go 1.26 (`services/api-go/go.mod`), and golangci-lint for the complete local check; without it, `verify.mjs` reports golangci-lint as skipped, and CI still runs it.
+- Go <!-- generated:version services/api-go/go.mod -->1.26<!-- /generated --> (`services/api-go/go.mod`), and golangci-lint <!-- generated:tool golangci-lint -->2.13.2<!-- /generated --> for the complete local check: `node scripts/tools.mjs install --local` installs it at that version. Without it, `verify.mjs` reports golangci-lint as skipped, and CI still runs it.
 <!-- ultra:end go-service -->
 <!-- ultra:begin py-service -->
-- Python 3.13 or newer and [uv](https://docs.astral.sh/uv/) (`services/api-py/.python-version`), which installs the rest.
+- Python <!-- generated:floor services/api-py/pyproject.toml -->3.13<!-- /generated --> or newer and [uv](https://docs.astral.sh/uv/) <!-- generated:tool uv -->0.12.18<!-- /generated --> (`services/api-py/.python-version`, `scripts/tools/tools.json`), which installs the rest.
 <!-- ultra:end py-service -->
 - The GitHub CLI, only to apply repository settings with `configure-github.mjs`.
 
@@ -116,7 +120,7 @@ Each toolchain version is pinned once, in the file named beside it above, so the
    node scripts/verify.mjs <module>    # the chassis plus the named modules only
    ```
 
-   It runs each module's own checks and tests, and the API contract against every task service present, on the Node major `.node-version` names, and fails on any other. A check it cannot run fails, and the two it may skip, golangci-lint and Go's race detector where there is no C compiler, are reported as skipped by name, never as passed. A few checks run only in CI, because they need a container engine, a network service or a CI-only tool: actionlint and zizmor on the workflows, `npm audit signatures`, building and starting each container image, and the report-only scans in `security.yml`.
+   It runs each module's own checks and tests, and the API contract against every task service present, on the Node major `.node-version` names, and fails on any other. A check it cannot run fails. One whose tool or condition this machine lacks is reported as skipped by name, never as passed: a pinned tool that is not installed (`node scripts/tools.mjs install --local` installs them), Go's race detector where there is no C compiler, and actionlint's shell-script rules where there is no shellcheck. A few checks run only in CI, because they need a container engine or a network service: `npm audit signatures`, building and starting each container image, and the report-only scans in `security.yml`.
 
 3. Start what you are working on. Each module's entry under *What's here* names the command that starts it.
 
@@ -127,22 +131,22 @@ Each toolchain version is pinned once, in the file named beside it above, so the
 - `scripts/check-contract.mjs` — holds every task service to the one API contract, whose cases are in `scripts/contract/` beside the OpenAPI document it holds to them.
 <!-- ultra:end go-service|ts-service|py-service -->
 <!-- ultra:begin mcp-server|web|ts-library -->
-- `scripts/check-rules.mjs` — holds every module that repeats the task rules without serving them to `scripts/rules/task-rules.json`.
+- `scripts/check-facts.mjs` — holds every module that repeats a fact without serving it (the task rules, the API's default port) to the file that states it.
 <!-- ultra:end mcp-server|web|ts-library -->
 <!-- ultra:begin go-service -->
-- `services/api-go/` — Go task API in Clean Architecture layers. `go run ./cmd/api` there serves it on port 8080. [README](services/api-go/README.md)
+- `services/api-go/` — Go task API in Clean Architecture layers. `go run ./cmd/api` there serves it on port <!-- generated:contract config.PORT.default.value -->8080<!-- /generated -->. [README](services/api-go/README.md)
 <!-- ultra:end go-service -->
 <!-- ultra:begin ts-service -->
-- `services/api-ts/` — TypeScript task API with a pure domain core. `npm start` there serves it on port 8080. [README](services/api-ts/README.md)
+- `services/api-ts/` — TypeScript task API with a pure domain core. `npm start` there serves it on port <!-- generated:contract config.PORT.default.value -->8080<!-- /generated -->. [README](services/api-ts/README.md)
 <!-- ultra:end ts-service -->
 <!-- ultra:begin py-service -->
-- `services/api-py/` — Python task API, same routes and layers. `uv run --directory src python -m api_py.main` there serves it on port 8080. [README](services/api-py/README.md)
+- `services/api-py/` — Python task API, same routes and layers. `uv run --directory src python -m api_py.main` there serves it on port <!-- generated:contract config.PORT.default.value -->8080<!-- /generated -->. [README](services/api-py/README.md)
 <!-- ultra:end py-service -->
 <!-- ultra:begin mcp-server -->
 - `services/mcp-server/` — MCP server exposing the task API to an AI assistant. `npm start` there serves it over stdio, calling the task API at `TASK_API_URL`; the README shows how to register it with a client. [README](services/mcp-server/README.md)
 <!-- ultra:end mcp-server -->
 <!-- ultra:begin web -->
-- `apps/web/` — React single-page app, organised by feature. `npm run dev` there serves it at http://localhost:5173, with `/api` passed to a task service on port 8080. [README](apps/web/README.md)
+- `apps/web/` — React single-page app, organised by feature. `npm run dev` there serves it at http://localhost:5173, with `/api` passed to a task service on port <!-- generated:contract config.PORT.default.value -->8080<!-- /generated -->. [README](apps/web/README.md)
 <!-- ultra:end web -->
 <!-- ultra:begin ts-library -->
 - `packages/ts-library/` — TypeScript library published to npm. `npm run verify` there builds it and checks the package consumers would install. [README](packages/ts-library/README.md)
@@ -156,11 +160,11 @@ Each toolchain version is pinned once, in the file named beside it above, so the
 
 ## Working with a coding agent
 
-[AGENTS.md](AGENTS.md) holds the rules every coding agent follows here; `CLAUDE.md`, `GEMINI.md` and Copilot's instructions point to it rather than repeating it. For a recurring task, such as recording a decision or taking a template update, the matching procedure in `.claude/skills/` is the one to follow. Ask the agent to run `node scripts/verify.mjs` and to say what it ran before it reports a change as done.
+[AGENTS.md](AGENTS.md) holds the rules every coding agent follows here; `CLAUDE.md`, `GEMINI.md` and Copilot's instructions point to it rather than repeating it. For a recurring task, such as recording a decision, changing the task contract or taking a template update, the matching procedure in `.claude/skills/` is the one to follow. Ask the agent to run `node scripts/verify.mjs` and to say what it ran before it reports a change as done. In a Claude Code cloud session, `.claude/settings.json` has the session prepare itself first — the Node `.node-version` names, the pinned tools, then setup — so the agent's first `verify` checks what CI checks.
 
 ## Continuous integration
 
-- **`verify.yml`** — on every pull request, every push to `main`, and in a merge queue: repository hygiene, chassis tests on Linux and on Windows, actionlint, a security audit of the workflows with [zizmor](https://docs.zizmor.sh), and one job per module — each service job also runs the API contract and starts the service's container image to prove it answers, and each module job writes its test coverage to the job summary, reported and never gated — all feeding the aggregate **`verify`** job, which is the only required check ([ADR-0002](docs/adr/0002-one-required-check.md), [ADR-0011](docs/adr/0011-what-local-verify-guarantees.md)).
+- **`verify.yml`** — on every pull request, every push to `main`, and in a merge queue: repository hygiene, chassis tests on Linux and on Windows, actionlint, a security audit of the workflows with [zizmor](https://docs.zizmor.sh), the agent environment run from the oldest Node it supports, and one job per module, which runs what the module's `module.json` names through the same `verify.mjs` a contributor runs — its checks, the API contract, its facts, its end-to-end check — then writes its test coverage to the job summary, reported and never gated, and starts its container image and holds it to the contract's defaults and clean shutdown. All of them feed the aggregate **`verify`** job, the only required check ([ADR-0002](docs/adr/0002-one-required-check.md), [ADR-0011](docs/adr/0011-what-local-verify-guarantees.md), [ADR-0014](docs/adr/0014-modules-describe-themselves.md)).
 - **`pr-title.yml`** — pull request titles follow Conventional Commits.
 - **`copilot-setup-steps.yml`** — the environment GitHub's Copilot coding agent prepares before it works here: every toolchain the selected features need, then `node scripts/setup.mjs`. It runs on its own only when it changes.
 - **`security.yml`** — report-only scans that fail only when a scan could not run: gitleaks over new commits and weekly over history, `npm audit` for every npm lockfile, and a Trivy scan of every container image the repository builds, for fixable high and critical vulnerabilities in its operating-system and language packages.
@@ -170,7 +174,7 @@ Each toolchain version is pinned once, in the file named beside it above, so the
 <!-- ultra:begin py-service -->
 - **`security.yml`, Python** — pip-audit over the Python service's lockfile.
 <!-- ultra:end py-service -->
-- **`pins.yml`** — weekly, report-only: which tools pinned by hand in the workflows have a newer release. It never moves a pin; [docs/toolchain-updates.md](docs/toolchain-updates.md) says how.
+- **`pins.yml`** — weekly, report-only: which tools pinned by hand in `scripts/tools/tools.json` have a newer release. It never moves a pin; [docs/toolchain-updates.md](docs/toolchain-updates.md) says how.
 - **`codeql.yml`** — CodeQL analysis; enable it by setting the repository variable `CODEQL_ENABLED=true` (needs a public repository or GitHub Advanced Security).
 - **`scorecard.yml`** — [OpenSSF Scorecard](https://scorecard.dev): an outside measurement of the practices this repository claims, published and uploaded to code scanning; enable it with `SCORECARD_ENABLED=true` on a public repository. Some checks measure the project rather than the workflows, and a new or single-maintainer repository scores low on them: Code-Review and Branch-Protection while pull requests merge without a second person's review, Maintained for its first 90 days, SAST until CodeQL has run on recent pull requests, and CII-Best-Practices until the project registers for the badge.
 <!-- ultra:begin mcp-server -->

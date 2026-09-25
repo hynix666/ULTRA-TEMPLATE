@@ -14,13 +14,21 @@ src/main.tsx             entry point
 
 ## Run
 
+<!-- generated:fill
+```bash
+npm install
+npm run dev        # http://localhost:5173, with /api proxied to :{{contract config.PORT.default.value}}
+npm run verify     # import boundaries, typecheck, Vitest, production build
+```
+-->
 ```bash
 npm install
 npm run dev        # http://localhost:5173, with /api proxied to :8080
 npm run verify     # import boundaries, typecheck, Vitest, production build
 ```
+<!-- /generated -->
 
-Start one of this project's task services on port 8080 for the page to have data; the service's own README says how.
+Start one of this project's task services on port <!-- generated:contract config.PORT.default.value -->8080<!-- /generated --> for the page to have data; the service's own README says how.
 
 ## Test
 

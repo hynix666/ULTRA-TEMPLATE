@@ -10,6 +10,10 @@
  *   src/main.ts and src/config.ts are the composition root and may import anything
  *   any other file under src/ belongs to no layer, and fails
  *
+ * Below the composition root no file reads the wall clock, draws randomness or reads the environment
+ * (EFFECTS): each is injected, a clock or an id source or a Config, which is what lets every layer be
+ * tested without them. Those are matched as text, with comments removed first.
+ *
  * Specifiers are read with a regular expression, not a parser: static import/export-from, side-effect
  * imports and dynamic import() with a string literal.
  * An import-shaped string inside a comment can raise a false alarm; nothing makes it miss a real import.
@@ -34,6 +38,23 @@ const IMPORT_RE =
 /** The composition root may import anything. Every other file under src/ must belong to a layer. */
 export const COMPOSITION_ROOT = ["src/main.ts", "src/config.ts"];
 
+/**
+ * What only the composition root may do, as it is written in source. `new Date(value)` parses a value,
+ * so only `new Date()`, the clock, is listed.
+ */
+export const EFFECTS = [
+  { pattern: /\bDate\.now\s*\(/, what: "reads the wall clock (Date.now)" },
+  { pattern: /\bnew\s+Date\s*\(\s*\)/, what: "reads the wall clock (new Date())" },
+  { pattern: /\bperformance\.now\s*\(/, what: "reads a clock (performance.now)" },
+  { pattern: /\bMath\.random\s*\(/, what: "draws randomness (Math.random)" },
+  { pattern: /\b(?:randomUUID|getRandomValues|randomBytes|randomInt)\b/, what: "draws randomness (crypto)" },
+  { pattern: /\bprocess\.env\b/, what: "reads the environment (process.env)" },
+];
+
+// Comments go first, so a doc comment that names performance.now is not a use of it. A `//` after a
+// colon or inside a string, as in a URL, is left alone.
+const withoutComments = (source) => source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:"'`\\])\/\/.*$/gm, "$1");
+
 export const specifiers = (source) => [...source.matchAll(IMPORT_RE)].map((m) => m[1] ?? m[2] ?? m[3]);
 
 /** Violations in one file. `file` is a POSIX path relative to the service root, such as src/domain/task.ts. */
@@ -46,6 +67,11 @@ export function checkFile(file, source) {
       : [`${file} belongs to no layer. Move it into ${LAYERS.map((l) => l.dir).join(", ")}, or add a layer with its own allowlist.`];
   }
   const problems = [];
+  const code = withoutComments(source);
+  for (const { pattern, what } of EFFECTS) {
+    if (pattern.test(code))
+      problems.push(`${file} ${what}; below the composition root it is injected. Take it as a parameter from ${COMPOSITION_ROOT[0]}.`);
+  }
   for (const spec of specifiers(source)) {
     if (spec.startsWith(".")) {
       const target = posix.normalize(posix.join(posix.dirname(file), spec));

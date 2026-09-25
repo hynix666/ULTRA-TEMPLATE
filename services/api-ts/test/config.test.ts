@@ -44,3 +44,8 @@ test("values that cannot be used are refused", () => {
   ];
   for (const env of bad) assert.throws(() => loadConfig(env), ConfigError, JSON.stringify(env));
 });
+
+test("a timeout longer than Go's time.Duration can hold is refused, as api-go refuses it", () => {
+  assert.equal(loadConfig({ SHUTDOWN_TIMEOUT: "2562047h" }).shutdownTimeoutMs, 2562047 * 3_600_000);
+  assert.throws(() => loadConfig({ SHUTDOWN_TIMEOUT: "2562048h" }), ConfigError);
+});

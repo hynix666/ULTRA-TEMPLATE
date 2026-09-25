@@ -6,6 +6,8 @@ node_modules/
 dist/
 build/
 coverage/
+# Tools scripts/tools.mjs installs locally, checked against scripts/tools/tools.json.
+.tools/
 *.tsbuildinfo
 .vite/
 

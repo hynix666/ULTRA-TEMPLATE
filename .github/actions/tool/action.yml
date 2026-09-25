@@ -1,0 +1,21 @@
+name: Install pinned tools
+description: Installs tools from scripts/tools/tools.json onto PATH, each checked against the SHA-256 its release publishes.
+inputs:
+  names:
+    description: Tool names from scripts/tools/tools.json, separated by spaces.
+    required: true
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      with:
+        node-version-file: .node-version
+    # The versions and checksums live in the manifest alone; a replaced release asset fails here,
+    # before anything is unpacked. Rule 16 fails on a pin written into a workflow instead.
+    - name: Install ${{ inputs.names }}
+      shell: bash
+      env:
+        NAMES: ${{ inputs.names }}
+      run: |
+        read -ra names <<< "$NAMES"
+        node scripts/tools.mjs install "${names[@]}"

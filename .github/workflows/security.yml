@@ -24,23 +24,16 @@ jobs:
   gitleaks:
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    env:
-      # The MIT-licensed CLI, not gitleaks-action (proprietary since v2, and it wants write access).
-      # Pinned by version AND by the SHA-256 in the release's checksums file. Bump both together.
-      GITLEAKS_VERSION: "8.30.1"
-      GITLEAKS_SHA256: "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           persist-credentials: false
-
-      - name: Install gitleaks (checksum-verified)
-        run: |
-          tarball="gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
-          curl -fsSL --retry 3 --retry-all-errors -o "$tarball" "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/${tarball}"
-          echo "${GITLEAKS_SHA256}  ${tarball}" | sha256sum -c -
-          tar -xzf "$tarball" gitleaks
+      # The MIT-licensed CLI, not gitleaks-action (proprietary since v2, and it wants write access),
+      # pinned with its checksum in scripts/tools/tools.json.
+      - uses: ./.github/actions/tool
+        with:
+          names: gitleaks
 
       # A pull request scans its own commits; push, schedule and manual runs scan all history.
       # --exit-code 3 separates "found something" from gitleaks' own errors (exit 1).
@@ -52,7 +45,7 @@ jobs:
           args=(git --no-banner --redact --exit-code 3 --report-format json --report-path gitleaks.json)
           if [ -n "$BASE_SHA" ]; then args+=("--log-opts=${BASE_SHA}..${HEAD_SHA}"); fi
           set +e
-          ./gitleaks "${args[@]}" .
+          gitleaks "${args[@]}" .
           code=$?
           set -e
           if [ "$code" -ne 0 ] && [ "$code" -ne 3 ]; then
@@ -109,26 +102,19 @@ jobs:
   # Every container image the repository builds, found from its Dockerfiles as the lockfiles are above,
   # scanned for known vulnerabilities in the packages inside it, the operating system's included: none of
   # the audits above can see those. Only fixable high and critical findings are listed, since only those
-  # can be acted on. Trivy runs as the CLI binary, pinned by version and by the SHA-256 in the release's
-  # checksums file, not through its GitHub Action. Suppress a finding only in .trivyignore, with the reason.
+  # can be acted on. Trivy runs as the CLI binary, pinned with its checksum in scripts/tools/tools.json,
+  # not through its GitHub Action. Suppress a finding only in .trivyignore, with the reason.
   # Results go to the job summary and to the log, so a scan's outcome is readable wherever one looks.
   image-scan:
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    env:
-      TRIVY_VERSION: "0.74.0"
-      TRIVY_SHA256: "2ae6fe3ee734b7fdf11335663e18c75ea12dccc76062f09f164a3b0f8be4371a"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-
-      - name: Install Trivy (checksum-verified)
-        run: |
-          tarball="trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz"
-          curl -fsSL --retry 3 --retry-all-errors -o "$tarball" "https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/${tarball}"
-          echo "${TRIVY_SHA256}  ${tarball}" | sha256sum -c -
-          tar -xzf "$tarball" trivy
+      - uses: ./.github/actions/tool
+        with:
+          names: trivy
 
       - name: Build and scan every image (report-only)
         run: |
@@ -144,7 +130,7 @@ jobs:
               failed=1
               continue
             fi
-            if ! ./trivy image --quiet --scanners vuln --severity HIGH,CRITICAL --ignore-unfixed \
+            if ! trivy image --quiet --scanners vuln --severity HIGH,CRITICAL --ignore-unfixed \
                 --ignorefile .trivyignore --format json --output "$RUNNER_TEMP/trivy.json" "$image"; then
               echo "### image scan could not run on ${dir}" | tee -a "$GITHUB_STEP_SUMMARY"
               failed=1
@@ -181,10 +167,13 @@ jobs:
         with:
           go-version-file: services/api-go/go.mod
           cache: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .node-version
       - name: govulncheck (report-only)
         run: |
           set +e
-          go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./... > "$RUNNER_TEMP/govulncheck.txt" 2>&1
+          node ../../scripts/tools.mjs run govulncheck -- ./... > "$RUNNER_TEMP/govulncheck.txt" 2>&1
           code=$?
           set -e
           {
@@ -210,15 +199,21 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .node-version
+      - name: The pinned uv
+        id: uv
+        run: echo "version=$(node ../../scripts/tools.mjs version uv)" >> "$GITHUB_OUTPUT"
       - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
         with:
-          version-file: services/api-py/pyproject.toml
+          version: ${{ steps.uv.outputs.version }}
       - name: pip-audit (report-only)
         run: |
           uv export --frozen --format requirements-txt --no-emit-project --output-file "$RUNNER_TEMP/requirements.txt" --quiet
           # pip-audit exits 1 both for findings and for failing to run, so the report decides: it is
           # written only when the scan completed.
-          uvx pip-audit==2.10.1 --requirement "$RUNNER_TEMP/requirements.txt" --no-deps --disable-pip \
+          node ../../scripts/tools.mjs run pip-audit -- --requirement "$RUNNER_TEMP/requirements.txt" --no-deps --disable-pip \
             --progress-spinner off --format json --output "$RUNNER_TEMP/pip-audit.json" || true
           node -e '
             const { readFileSync, appendFileSync } = require("node:fs");

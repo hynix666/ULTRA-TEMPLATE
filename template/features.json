@@ -1,6 +1,6 @@
 {
   "$comment": "Read by template/init.mjs, and deleted with it. A feature's paths are deleted when it is not selected; content inside shared files is selected with marker lines instead. See template/README.md.",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "identity": {
     "owner": "hynix666",
     "repo": "ULTRA-TEMPLATE",
@@ -9,45 +9,45 @@
   "templateOnly": ["template", ".github/workflows/template-test.yml", ".github/workflows/template-release.yml"],
   "features": {
     "go-service": {
-      "summary": "Go HTTP service: Clean Architecture layers, standard library only, import rules enforced by a test",
+      "summary": "Go HTTP service in Clean Architecture layers, standard library only; a test enforces the layer rules; golangci-lint; distroless image",
       "describes": "a Go task API",
-      "paths": ["services/api-go", ".claude/skills/add-endpoint-go", "scripts/check-contract.mjs", "scripts/contract", "test/check-contract.test.mjs", "scripts/rules"]
+      "paths": ["services/api-go", ".claude/skills/add-endpoint-go", "scripts/check-contract.mjs", "scripts/contract", "test/check-contract.test.mjs", "scripts/rules", ".claude/skills/change-task-contract"]
     },
     "ts-service": {
-      "summary": "TypeScript HTTP service on Node 24: pure domain core, import boundaries checked on every file",
+      "summary": "TypeScript HTTP service run directly by Node; pure domain core; import boundaries checked on every file; no runtime dependencies",
       "describes": "a TypeScript task API",
-      "paths": ["services/api-ts", ".claude/skills/add-endpoint-ts", "scripts/check-contract.mjs", "scripts/contract", "test/check-contract.test.mjs", "scripts/rules"]
+      "paths": ["services/api-ts", ".claude/skills/add-endpoint-ts", "scripts/check-contract.mjs", "scripts/contract", "test/check-contract.test.mjs", "scripts/rules", "biome.jsonc", ".claude/skills/change-task-contract"]
     },
     "mcp-server": {
-      "summary": "MCP server on the Model Context Protocol SDK: tools over stdio, the same layers, driven in tests by a real client",
+      "summary": "MCP server on the official SDK: task tools over stdio for an AI assistant, same layers, driven in tests by a real client",
       "describes": "an MCP server that gives an AI assistant the task API's tools",
-      "paths": ["services/mcp-server", ".claude/skills/add-mcp-tool", ".github/workflows/mcp-publish.yml", "scripts/rules", "scripts/check-rules.mjs", "test/check-rules.test.mjs"]
+      "paths": ["services/mcp-server", ".claude/skills/add-mcp-tool", ".github/workflows/mcp-publish.yml", "scripts/rules", "scripts/contract", "scripts/check-facts.mjs", "test/check-facts.test.mjs", "biome.jsonc", ".claude/skills/change-task-contract"]
     },
     "py-service": {
-      "summary": "Python HTTP service on the standard library: pure domain, WSGI transport, layer rules enforced by an ast-based check",
+      "summary": "Python HTTP service on the standard library: pure domain, WSGI transport, ruff and strict mypy, layer rules enforced by an `ast`-based check",
       "describes": "a Python task API",
-      "paths": ["services/api-py", ".claude/skills/add-endpoint-py", "scripts/check-contract.mjs", "scripts/contract", "test/check-contract.test.mjs", "scripts/rules"]
+      "paths": ["services/api-py", ".claude/skills/add-endpoint-py", "scripts/check-contract.mjs", "scripts/contract", "test/check-contract.test.mjs", "scripts/rules", ".claude/skills/change-task-contract"]
     },
     "web": {
-      "summary": "React + Vite app in feature folders, import boundaries checked, component tests",
+      "summary": "React + Vite app organised by feature (bulletproof-react), import boundaries checked on every file, unit and component tests",
       "describes": "a React web app",
-      "paths": ["apps/web", "scripts/rules", "scripts/check-rules.mjs", "test/check-rules.test.mjs"]
+      "paths": ["apps/web", "scripts/rules", "scripts/contract", "scripts/check-facts.mjs", "test/check-facts.test.mjs", "biome.jsonc", ".claude/skills/change-task-contract"]
     },
     "ts-library": {
-      "summary": "TypeScript library for npm: exports map, publint and type checks on the packed tarball, trusted publishing",
+      "summary": "TypeScript library for npm: one `exports` entry, publint and are-the-types-wrong checks on the packed tarball, which is also installed into an empty project and imported, tokenless trusted publishing with provenance",
       "describes": "a TypeScript library for npm",
-      "paths": ["packages/ts-library", "scripts/rules", "scripts/check-rules.mjs", "test/check-rules.test.mjs"]
+      "paths": ["packages/ts-library", "scripts/rules", "scripts/check-facts.mjs", "test/check-facts.test.mjs", "biome.jsonc", ".claude/skills/change-task-contract"]
     },
     "architecture": {
-      "summary": "LikeC4 architecture-as-code: model rules run as tests, optional GitHub Pages site",
-      "paths": ["architecture", ".github/workflows/architecture.yml"]
+      "summary": "LikeC4 model of the system, with model rules as tests and an opt-in GitHub Pages site",
+      "paths": ["architecture", ".github/workflows/architecture.yml", "biome.jsonc", "scripts/check-architecture.mjs", "test/check-architecture.test.mjs"]
     },
     "release": {
-      "summary": "release-please: release pull requests, tags and CHANGELOG from Conventional Commits",
+      "summary": "release-please: release pull requests, tags and `CHANGELOG.md` from Conventional Commits",
       "paths": [".github/workflows/release.yml", "release-please-config.json", ".release-please-manifest.json"]
     },
     "devcontainer": {
-      "summary": "Dev Container carrying the toolchains the selected features need",
+      "summary": "Dev Container with the toolchains of the features you selected",
       "paths": [".devcontainer"]
     }
   },

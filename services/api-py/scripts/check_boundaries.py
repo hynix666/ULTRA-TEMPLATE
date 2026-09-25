@@ -9,8 +9,12 @@ author already thought of:
     api_py/main.py and api_py/config.py are the composition root and may import anything
     any other module under api_py/ belongs to no layer, and fails
 
-Imports are read with ``ast``, the same parser Python itself uses, so a name inside a string or a
-comment cannot raise a false alarm and no import can hide from it.
+Below the composition root no module reads a clock, draws randomness or reads the environment
+(EFFECTS): each is injected, as a clock, an id source or a mapping of settings, which is what lets every
+layer be tested without them. The adapters may import anything, so this is the rule that keeps them to it.
+
+Imports and names are read with ``ast``, the same parser Python itself uses, so a name inside a string or
+a comment cannot raise a false alarm and no import can hide from it, renamed or not.
 
     uv run python scripts/check_boundaries.py
 
@@ -31,6 +35,29 @@ PACKAGE = "api_py"
 PURE_STDLIB = frozenset({"__future__", "abc", "collections", "collections.abc", "dataclasses", "enum", "re", "typing"})
 
 COMPOSITION_ROOT = frozenset({"main.py", "config.py"})
+
+# What only the composition root may use: modules that are nothing but randomness, and the functions of
+# other modules that read a clock, a random source or the environment.
+EFFECT_MODULES = frozenset({"random", "secrets"})
+EFFECTS = frozenset(
+    {
+        "time.time",
+        "time.time_ns",
+        "time.monotonic",
+        "time.monotonic_ns",
+        "time.perf_counter",
+        "time.perf_counter_ns",
+        "datetime.now",
+        "datetime.utcnow",
+        "datetime.today",
+        "date.today",
+        "os.environ",
+        "os.environb",
+        "os.getenv",
+        "uuid.uuid1",
+        "uuid.uuid4",
+    }
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -69,6 +96,43 @@ def imported_modules(source: str, relative: str) -> list[str]:
     return [name for name in names if name != ""]
 
 
+def effects(source: str) -> list[str]:
+    """Every clock, random source or environment this source reaches, as the dotted name it uses."""
+    tree = ast.parse(source)
+    # What each local name stands for: `import time as clock` makes clock mean time, and
+    # `from datetime import datetime` makes datetime mean datetime.datetime, whose now is datetime.now.
+    names: dict[str, str] = {}
+    found: list[str] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name.split(".")[0] in EFFECT_MODULES:
+                    found.append(f"import {alias.name}")
+                names[alias.asname or alias.name] = alias.name
+        elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+            if node.module.split(".")[0] in EFFECT_MODULES:
+                found.append(f"from {node.module} import ...")
+            for alias in node.names:
+                dotted = f"{node.module.rsplit('.', 1)[-1]}.{alias.name}"
+                if dotted in EFFECTS:
+                    found.append(dotted)
+                names[alias.asname or alias.name] = alias.name if node.module == alias.name else dotted
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Attribute):
+            # The whole chain, its first name resolved, so datetime.datetime.now reads as datetime.now.
+            parts = [node.attr]
+            value = node.value
+            while isinstance(value, ast.Attribute):
+                parts.insert(0, value.attr)
+                value = value.value
+            if not isinstance(value, ast.Name):
+                continue
+            chain = [*names.get(value.id, value.id).split("."), *parts]
+            if ".".join(chain[-2:]) in EFFECTS:
+                found.append(".".join(chain[-2:]))
+    return found
+
+
 def check_file(relative: str, source: str) -> list[str]:
     """Violations in one file. ``relative`` is POSIX and rooted at the package, e.g. domain/task.py."""
     head = relative.split("/")[0]
@@ -81,7 +145,11 @@ def check_file(relative: str, source: str) -> list[str]:
             f"{', '.join(one.package for one in LAYERS)}, or add a layer with its own allowlist."
         ]
 
-    problems: list[str] = []
+    problems: list[str] = [
+        f"{relative} uses {effect}; below the composition root it is injected. Take it as a parameter "
+        f"from {sorted(COMPOSITION_ROOT)[0]}."
+        for effect in effects(source)
+    ]
     for module in imported_modules(source, relative):
         if module == PACKAGE or module.startswith(f"{PACKAGE}."):
             target = module[len(PACKAGE) + 1 :].split(".")[0]

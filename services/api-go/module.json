@@ -1,0 +1,23 @@
+{
+  "id": "go-service",
+  "toolchain": "go",
+  "checks": [
+    { "name": "gofmt", "run": ["gofmt", "-l", "."], "expect": "no-output", "why": "gofmt lists unformatted files and exits 0, so its output is the finding." },
+    { "name": "go mod tidy -diff", "run": ["go", "mod", "tidy", "-diff"] },
+    { "name": "go vet", "run": ["go", "vet", "./..."] },
+    {
+      "name": "go test -race",
+      "run": ["go", "test", "-race", "./..."],
+      "requires": "cgo",
+      "otherwise": { "name": "go test", "run": ["go", "test", "./..."] },
+      "why": "The race detector needs cgo and a C compiler. Without them the tests still run, and the missing detector is named."
+    },
+    { "name": "golangci-lint", "run": ["golangci-lint", "run"], "tool": "golangci-lint" }
+  ],
+  "coverage": { "run": [["go", "test", "-race", "-coverprofile=coverage/coverage.out", "./..."]], "report": "coverage/coverage.out" },
+  "taskApi": {
+    "build": ["go", "build", "-o", "{scratch}/api{exe}", "./cmd/api"],
+    "run": ["{scratch}/api{exe}"]
+  },
+  "image": "http"
+}

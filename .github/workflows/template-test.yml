@@ -25,14 +25,12 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  preset:
-    name: preset (${{ matrix.preset }})
+  # The presets come from template/features.json, so adding one there adds it here with no edit.
+  presets:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
-    strategy:
-      fail-fast: false
-      matrix:
-        preset: [minimal, go-api, py-api, fullstack-ts, library, mcp, all]
+    timeout-minutes: 5
+    outputs:
+      presets: ${{ steps.list.outputs.presets }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -40,45 +38,61 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version-file: .node-version
-      # Only the toolchains this preset's features need. Read from features.json rather than restated
-      # here, so a preset that gains a feature needs no edit to this file. (The version files below
-      # are read before init runs, while the checkout still holds every feature.)
-      - name: Toolchains this preset needs
-        id: needs
-        env:
-          PRESET: ${{ matrix.preset }}
-        run: |
-          node -e '
-            const { presets } = require("./template/features.json");
-            const features = presets[process.env.PRESET] ?? [];
-            const { appendFileSync } = require("node:fs");
-            appendFileSync(process.env.GITHUB_OUTPUT, "go=" + features.includes("go-service") + "\n");
-            appendFileSync(process.env.GITHUB_OUTPUT, "python=" + features.includes("py-service") + "\n");
-          '
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        if: steps.needs.outputs.go == 'true'
+      - name: Every preset
+        id: list
+        run: echo "presets=$(node -p 'JSON.stringify(Object.keys(require("./template/features.json").presets))')" >> "$GITHUB_OUTPUT"
+
+  preset:
+    name: preset (${{ matrix.preset }})
+    needs: presets
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        preset: ${{ fromJSON(needs.presets.outputs.presets) }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          go-version-file: services/api-go/go.mod
-          cache: false
-      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
-        if: steps.needs.outputs.python == 'true'
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          version-file: services/api-py/pyproject.toml
-      - uses: ./.github/actions/setup-actionlint
-      - uses: ./.github/actions/setup-zizmor
+          node-version-file: .node-version
 
       # In place, on this job's own fresh checkout — exactly what an adopter runs after "Use this
       # template". The unit tests cover --out; this covers the path people actually take.
       - name: Initialize in place
         env:
           PRESET: ${{ matrix.preset }}
-        run: node template/init.mjs --name demo-app --owner octo-org --preset "$PRESET"
-
-      - name: Commit, install and verify the initialized project
         run: |
+          node template/init.mjs --name demo-app --owner octo-org --preset "$PRESET"
           git add -A
           git -c user.name=ci -c user.email=ci@example.invalid commit -q -m "chore: initialize project"
           test ! -e template || { echo "::error::template/ survived initialization"; exit 1; }
+
+      # Only the toolchains the generated project's own modules need, read from their module.json.
+      - name: Toolchains this project needs
+        id: needs
+        run: |
+          node scripts/modules.mjs toolchains --github-output
+          echo "uv=$(node scripts/tools.mjs version uv)" >> "$GITHUB_OUTPUT"
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        if: steps.needs.outputs.go == 'true'
+        with:
+          go-version-file: ${{ steps.needs.outputs.go-version-file }}
+          cache: false
+      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+        if: steps.needs.outputs.python == 'true'
+        with:
+          version: ${{ steps.needs.outputs.uv }}
+      # Every pinned tool the project's checks run, as a contributor installs them: the chassis's
+      # (actionlint, zizmor) and its toolchains' (golangci-lint with Go). verify fails in CI on a check
+      # it would skip for want of one, so a tool missing here would fail the preset, not pass it unchecked.
+      - name: The pinned tools this project runs
+        run: node scripts/tools.mjs install --local
+
+      - name: Install and verify the initialized project
+        run: |
           node scripts/setup.mjs
           node scripts/verify.mjs
           actionlint -color

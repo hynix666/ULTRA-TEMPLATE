@@ -4,7 +4,7 @@ import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync,
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
-import { MODULES } from "../scripts/modules.mjs";
+import { presentModules } from "../scripts/modules.mjs";
 import {
   applyMarkers, DESCRIPTION_ANCHOR, describeProject, InitError, loadManifest, MARKER_RE, originDefaults, originIdentity, plan, recordDescription,
   removedPaths, replaceIdentity, resolveSelection, ROOT, toProjectName, validateDescription, validateIdentity, validateManifest,
@@ -54,9 +54,22 @@ test("a block joined to several features is kept when any one of them is selecte
   assert.equal(applyMarkers(text, new Set(), known), "a\nz");
 });
 
-test("a joined block is malformed on an unknown id, a different end, or the reserved id", () => {
+test("a block joined with & is kept only when every one of its features is selected", () => {
+  const both = "web&go-service";
+  const text = ["a", begin(both), "calls", end(both), "z"].join("\n");
+  assert.equal(applyMarkers(text, new Set(["web", "go-service"]), known), "a\ncalls\nz");
+  assert.equal(applyMarkers(text, new Set(["web"]), known), "a\nz");
+  assert.equal(applyMarkers(text, new Set(["go-service"]), known), "a\nz");
+  assert.equal(applyMarkers(text, new Set(), known), "a\nz");
+});
+
+test("a joined block is malformed on an unknown id, a different end, the reserved id, or | and & mixed", () => {
   const cases = {
     unknown: [begin("web|nope"), end("web|nope")],
+    unknownAll: [begin("web&nope"), end("web&nope")],
+    mixed: [begin("web|go-service&web"), end("web|go-service&web")],
+    reservedAll: [begin("web&template"), end("web&template")],
+    otherJoiner: [begin("web&go-service"), end("web|go-service")],
     // The end names the same ids in the same order, so a half-edited pair is an error, not a guess.
     reordered: [begin("web|go-service"), end("go-service|web")],
     partial: [begin("web|go-service"), end("web")],
@@ -167,10 +180,12 @@ test("a path may belong to several features, but not to one inside another's or 
   assert.deepEqual(validateManifest(manifest({ a: { paths: ["svc"] }, b: { paths: ["svc2"] } }), exists), []);
 });
 
-test("template-test generates exactly the presets features.json defines", () => {
+test("template-test generates every preset features.json defines, from features.json itself", () => {
+  // A list of presets written into the workflow is one a new preset would be missing from.
   const workflow = readFileSync(join(ROOT, ".github/workflows/template-test.yml"), "utf8");
-  const matrix = /^\s*preset: \[([^\]]*)\]/m.exec(workflow)?.[1].split(",").map((p) => p.trim());
-  assert.deepEqual(matrix, Object.keys(loadManifest().presets));
+  assert.doesNotMatch(workflow, /^\s*preset: \[/m, "the matrix lists presets of its own");
+  assert.match(workflow, /preset: \$\{\{ fromJSON\(needs\.presets\.outputs\.presets\) \}\}/);
+  assert.match(workflow, /Object\.keys\(require\("\.\/template\/features\.json"\)\.presets\)/);
 });
 
 test("the 1.x public contract only grows: no feature or preset is removed or renamed", () => {
@@ -187,21 +202,24 @@ test("the 1.x public contract only grows: no feature or preset is removed or ren
   }
 });
 
-test("every module directory scripts/modules.mjs knows is owned by exactly one feature", () => {
+test("every module's directory is owned by exactly one feature, the one its module.json names", () => {
   const manifest = loadManifest();
-  for (const module of MODULES) {
+  const modules = presentModules();
+  assert.ok(modules.length > 0, "no module.json found: discovery is broken");
+  for (const module of modules) {
     const owners = Object.entries(manifest.features).filter(([, f]) => f.paths.includes(module.dir)).map(([id]) => id);
     assert.deepEqual(owners, [module.id], module.dir);
   }
 });
 
 test("removed paths cover unselected features and template-only files", () => {
-  const removed = removedPaths(loadManifest(), new Set(["web"]));
+  const removed = removedPaths(loadManifest(), new Set(["ts-library"]));
   assert.ok(removed.includes("template") && removed.includes("services/api-go"));
-  assert.ok(!removed.includes("apps/web"));
+  assert.ok(!removed.includes("packages/ts-library"));
   // A path several features own goes only when none of its owners is selected.
-  assert.ok(removed.includes("scripts/contract"), "no task service selected");
+  assert.ok(removed.includes("scripts/contract"), "nothing that serves or calls the task API is selected");
   assert.ok(!removedPaths(loadManifest(), new Set(["py-service"])).includes("scripts/contract"), "one owner selected");
+  assert.ok(!removedPaths(loadManifest(), new Set(["web"])).includes("scripts/contract"), "a client of the API keeps the contract its facts are held to");
 });
 
 test("in-place init removes an unselected module whole, ignored files included", (t) => {

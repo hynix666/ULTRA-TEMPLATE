@@ -5,6 +5,11 @@ export interface Config {
 
 export class ConfigError extends Error {}
 
+const DEFAULT_PORT = 8080;
+const DEFAULT_SHUTDOWN_TIMEOUT_MS = 10_000;
+// Go's time.Duration is an int64 of nanoseconds, so api-go refuses a longer duration, and so does this.
+const MAX_DURATION_MS = (2 ** 63 - 1) / 1_000_000;
+
 const UNIT_MS: Readonly<Record<string, number>> = {
   h: 3_600_000,
   m: 60_000,
@@ -23,7 +28,7 @@ const DURATION = new RegExp(`^[-+]?(?:${PART})+$`);
 
 /**
  * Go's duration syntax — `10s`, `1m30s`, `.5s`, `500ms`, `250us` — so the value api-go accepts is the
- * value this service accepts. Null when the text is not a duration. Not rounded: a sub-millisecond
+ * value this service accepts. Null when the text is not a duration, or is longer than Go can hold. Not rounded: a sub-millisecond
  * timeout is still positive, as it is in Go.
  */
 export function parseDurationMs(raw: string): number | null {
@@ -32,6 +37,7 @@ export function parseDurationMs(raw: string): number | null {
   for (const [, amount, unit] of raw.matchAll(new RegExp(PART, "g"))) {
     total += Number(amount) * (UNIT_MS[unit ?? ""] ?? Number.NaN);
   }
+  if (total > MAX_DURATION_MS) return null;
   return raw.startsWith("-") ? -total : total;
 }
 
@@ -42,13 +48,13 @@ export function parseDurationMs(raw: string): number | null {
 export function loadConfig(env: Readonly<Record<string, string | undefined>>): Config {
   const rawPort = env["PORT"] ?? "";
   // Digits only, as strconv.Atoi reads them: Number() would also take "0x1F90", "8e3" and " 8080".
-  const port = rawPort === "" ? 8080 : /^[+-]?\d+$/.test(rawPort) ? Number(rawPort) : Number.NaN;
+  const port = rawPort === "" ? DEFAULT_PORT : /^[+-]?\d+$/.test(rawPort) ? Number(rawPort) : Number.NaN;
   if (!Number.isInteger(port) || port < 1 || port > 65535) {
     throw new ConfigError(`PORT must be an integer from 1 to 65535, got "${rawPort}"`);
   }
 
   const rawTimeout = env["SHUTDOWN_TIMEOUT"] ?? "";
-  const shutdownTimeoutMs = rawTimeout === "" ? 10_000 : parseDurationMs(rawTimeout);
+  const shutdownTimeoutMs = rawTimeout === "" ? DEFAULT_SHUTDOWN_TIMEOUT_MS : parseDurationMs(rawTimeout);
   if (shutdownTimeoutMs === null || !(shutdownTimeoutMs > 0)) {
     throw new ConfigError(`SHUTDOWN_TIMEOUT must be a positive duration such as 10s, 1m30s or 500ms, got "${rawTimeout}"`);
   }

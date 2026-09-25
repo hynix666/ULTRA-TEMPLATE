@@ -25,16 +25,28 @@
  *  11. No tracked source or config file contains an invisible or text-reordering character. A human
  *      reviewer sees nothing where an agent reads a hidden instruction, or code runs other than shown.
  *  12. No tracked source or config file holds an absolute path into someone's home directory.
- *  13. Every module present tracks the manifest and lockfile its toolchain installs from, a Node
- *      module's manifest has the `verify` script both verify.mjs and its CI job run, verify.yml has a
- *      job named after the module, and dependabot.yml an entry for its directory. Deleting the job
- *      or the entry leaves everything green while CI stops checking the module and its dependencies
- *      stop moving.
+ *  13. Every module's module.json is valid, and the module tracks the manifest and lockfile its
+ *      toolchain installs from, has every `npm run` script its module.json names, a verify.yml job
+ *      named after it, and a dependabot.yml entry for its directory. Deleting the job or the entry
+ *      leaves everything green while CI stops checking the module and its dependencies stop moving.
+ *      A toolchain manifest (package.json, go.mod, pyproject.toml) below the root with no module.json
+ *      beside it or above it fails too: nothing would install or verify it.
  *  14. Every Dockerfile `FROM` names its base image by digest. A tag can be repointed at a different
  *      image with no diff here, the exposure ADR-0003 pins actions against.
  *  15. A download in a workflow or local action that keeps a file is verified against a checksum in
  *      the same step, and no download is piped into an interpreter, which runs it before anything
  *      could check it.
+ *  16. No workflow or local action writes a version of its own: a tool version (`X_VERSION:`, `@vX.Y.Z`,
+ *      `==X.Y.Z`, a release download, `version: vX`) belongs in scripts/tools/tools.json, and a toolchain
+ *      version (`node-version: 24`) in the file its setup action reads. A pin written anywhere else is
+ *      one the pin report and the installer cannot see.
+ *  17. Every copy of a toolchain version agrees with the file that declares it: `.node-version` for
+ *      `engines`, the `@types/node` major, `node` base images and the Dev Container's node feature;
+ *      `go.mod` for `golang` base images and the go feature; `.python-version` for `python` base images
+ *      and the python feature, within `requires-python`, whose floor is mypy's `python_version`. The Dev
+ *      Container installs no tool at a version scripts/tools/tools.json does not pin, uv's pin satisfies
+ *      `required-version`, and every Node module pins one Biome. A copy nothing compares drifts, and the
+ *      image or the Dev Container then runs a toolchain CI never proved.
  *
  *   node scripts/check-hygiene.mjs
  *
@@ -44,7 +56,8 @@ import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { MODULES } from "./modules.mjs";
+import { MANIFEST, TOOLCHAINS, validateManifest } from "./modules.mjs";
+import { TOOLS_PATH } from "./tools.mjs";
 
 export const REQUIRED_IGNORES = ["node_modules/", "dist/", "coverage/", ".env", ".env.*"];
 /** Below this the file was truncated, not edited. */
@@ -87,17 +100,10 @@ export function checkInstalls(path, text) {
 }
 
 /**
- * What each toolchain installs from, and must therefore commit. Go has no entry: a module with
- * dependencies commits go.sum and one without does not, and `go mod tidy -diff` in verify holds both
- * to their go.mod.
- */
-const MODULE_FILES = { node: ["package.json", "package-lock.json"], python: ["pyproject.toml", "uv.lock"], go: ["go.mod"] };
-
-/**
- * Rule 13. A module whose lockfile is missing still installs — setup.mjs falls back to `npm install`,
- * which is how a new module's lockfile is first written — but from then on every machine and every CI
- * run resolves its own dependency tree, and nothing says so. This rule is what makes that fallback
- * safe to keep: the module cannot be committed without the lockfile the fallback produced.
+ * Rule 13. A module whose lockfile is missing still installs (setup.mjs falls back to its toolchain's
+ * unlocked install, which is how a new module's lockfile is first written), but from then on every
+ * machine and every CI run resolves its own dependency tree, and nothing says so. This rule is what
+ * makes that fallback safe to keep: the module cannot be committed without the lockfile it produced.
  */
 export function checkModules(tracked, read) {
   const failures = [];
@@ -105,32 +111,65 @@ export function checkModules(tracked, read) {
   // report the wrong thing.
   const jobs = tracked.includes(GATE) ? jobIds(read(GATE)) : null;
   const updated = tracked.includes(DEPENDABOT) ? dependabotDirectories(read(DEPENDABOT)) : null;
-  for (const module of MODULES) {
-    if (!tracked.some((path) => path.startsWith(`${module.dir}/`))) continue;
-    for (const file of MODULE_FILES[module.toolchain]) {
-      if (!tracked.includes(`${module.dir}/${file}`)) {
-        failures.push(`\`${module.dir}\` is present but does not track \`${file}\`, so it installs a dependency tree nothing pins.`);
-      }
-    }
-    if (jobs !== null && !jobs.includes(module.id)) {
-      failures.push(`\`${module.dir}\` is present but \`verify.yml\` has no \`${module.id}\` job, so CI never runs its checks.`);
-    }
-    if (updated !== null && !updated.includes(`/${module.dir}`)) {
-      failures.push(`\`${DEPENDABOT}\` has no entry for \`/${module.dir}\`, so its dependencies are never proposed for update.`);
-    }
-    if (module.toolchain !== "node" || !tracked.includes(`${module.dir}/package.json`)) continue;
-    let manifest;
+  const manifests = tracked.filter((path) => path.endsWith(`/${MANIFEST}`));
+  const dirs = manifests.map((path) => path.slice(0, -MANIFEST.length - 1));
+  const ids = new Map();
+  for (const [i, path] of manifests.entries()) {
+    const dir = dirs[i];
+    let module;
     // Rule 4 reports a manifest that does not parse; this rule says nothing more about it.
     try {
-      manifest = JSON.parse(read(`${module.dir}/package.json`));
+      module = JSON.parse(read(path));
     } catch {
       continue;
     }
-    if (manifest.scripts?.verify === undefined) {
-      failures.push(`\`${module.dir}/package.json\` has no \`verify\` script, which is the one entry point verify.mjs and its CI job run.`);
+    const problems = validateManifest(module, path);
+    if (problems.length > 0) {
+      failures.push(...problems.map((problem) => `${problem}.`));
+      continue;
+    }
+    if (ids.has(module.id)) failures.push(`\`${path}\` and \`${ids.get(module.id)}\` both name the module \`${module.id}\`.`);
+    ids.set(module.id, path);
+    const toolchain = TOOLCHAINS[module.toolchain];
+    for (const file of [toolchain.manifest, toolchain.lockfile].filter(Boolean)) {
+      if (!tracked.includes(`${dir}/${file}`)) {
+        failures.push(`\`${dir}\` is present but does not track \`${file}\`, so it installs a dependency tree nothing pins.`);
+      }
+    }
+    if (jobs !== null && !jobs.includes(module.id)) {
+      failures.push(`\`${dir}\` is present but \`verify.yml\` has no \`${module.id}\` job, so CI never runs its checks.`);
+    }
+    if (updated !== null && !updated.includes(`/${dir}`)) {
+      failures.push(`\`${DEPENDABOT}\` has no entry for \`/${dir}\`, so its dependencies are never proposed for update.`);
+    }
+    if (module.toolchain !== "node" || !tracked.includes(`${dir}/package.json`)) continue;
+    let scripts;
+    try {
+      scripts = JSON.parse(read(`${dir}/package.json`)).scripts ?? {};
+    } catch {
+      continue;
+    }
+    for (const script of npmScripts(module)) {
+      if (!(script in scripts)) failures.push(`\`${path}\` runs \`npm run ${script}\`, which \`${dir}/package.json\` does not define.`);
+    }
+  }
+  // A module nothing declares is a module nothing installs or verifies, while it looks like part of the build.
+  const manifestNames = new Set(Object.values(TOOLCHAINS).map((t) => t.manifest));
+  for (const path of tracked) {
+    const at = path.lastIndexOf("/");
+    if (at === -1 || !manifestNames.has(path.slice(at + 1))) continue;
+    const dir = path.slice(0, at);
+    if (!dirs.some((moduleDir) => dir === moduleDir || dir.startsWith(`${moduleDir}/`))) {
+      failures.push(`\`${path}\` looks like a module, but no \`${MANIFEST}\` declares it, so nothing installs or verifies it.`);
     }
   }
   return failures;
+}
+
+/** The npm scripts a module's manifest runs, from its checks, coverage and facts commands. */
+function npmScripts(module) {
+  const commands = [...module.checks.flatMap((c) => [c.run, c.otherwise?.run]), ...(module.coverage?.run ?? []), module.facts?.run].filter(Boolean);
+  return commands.filter((c) => c[0] === "npm" && c[1] === "run").map((c) => c.slice(2).find((arg) => !arg.startsWith("-")));
 }
 
 const GATE = ".github/workflows/verify.yml";
@@ -236,6 +275,29 @@ function downloader(stage) {
   return at !== -1 && stage.slice(0, at).every((word) => PREFIX.test(word)) ? at : -1;
 }
 
+// Lines shaped like a version written by hand. `uses:` lines are rule 8's, and are skipped.
+const PIN_SHAPED = [
+  [/^\s*[A-Z][A-Z0-9_]*_VERSION:\s*["']?v?\d/, "a tool version in an environment variable"],
+  [/@v\d+\.\d+\.\d+/, "a tool run at a version"],
+  [/==\d+\.\d+\.\d+/, "a package pinned to a version"],
+  [/\/releases\/download\/v?\d/, "a release downloaded by version"],
+  [/^\s+version:\s*["']?v?\d/, "a version input"],
+  [/^\s+(?:node|go|python|java|ruby|dotnet)-version:\s*["']?\d/, "a toolchain version"],
+];
+
+/** Rule 16, for one workflow or action file. */
+export function checkPins(path, text) {
+  const problems = [];
+  text.split(/\r?\n/).forEach((line, i) => {
+    if (/^\s*#/.test(line) || /^\s*-?\s*uses:/.test(line)) return;
+    const found = PIN_SHAPED.find(([shape]) => shape.test(line));
+    if (found) {
+      problems.push(`${path}:${i + 1} writes ${found[1]} (\`${line.trim()}\`). Pin a tool in scripts/tools/tools.json and read it with scripts/tools.mjs; read a toolchain version from its file (node-version-file, go-version-file).`);
+    }
+  });
+  return problems;
+}
+
 /** Rule 15, for one workflow or action file. A step is the YAML list item a line sits in. */
 export function checkDownloads(path, text) {
   const lines = text.split(/\r?\n/);
@@ -265,6 +327,243 @@ export function checkDownloads(path, text) {
     }
   }
   return problems;
+}
+
+/**
+ * Where each toolchain declares its version (a file whose directory it governs), how many leading
+ * numbers are the version that matters (Node: the major; Go and Python: major.minor), the official
+ * image that carries it, and the Dev Container feature that installs it.
+ */
+export const TOOLCHAIN_VERSIONS = {
+  node: { name: "Node", file: /(^|\/)\.node-version$/, read: (text) => text.trim(), parts: 1, image: "node", feature: "node" },
+  go: { name: "Go", file: /(^|\/)go\.mod$/, read: (text) => /^go\s+(\S+)/m.exec(text)?.[1] ?? "", parts: 2, image: "golang", feature: "go" },
+  python: { name: "Python", file: /(^|\/)\.python-version$/, read: (text) => text.trim(), parts: 2, image: "python", feature: "python" },
+};
+const DEVCONTAINER = /(^|\/)\.?devcontainer\.json$/;
+const DEPENDENCY_KEYS = ["dependencies", "devDependencies", "peerDependencies", "optionalDependencies"];
+
+/** The first `parts` numbers of the first version in `text` ("^24.13.5" → "24"), or null when it has fewer. */
+export function leadingVersion(text, parts) {
+  const numbers = /\d+(?:\.\d+)*/.exec(String(text ?? ""))?.[0].split(".") ?? [];
+  return numbers.length >= parts ? numbers.slice(0, parts).map(Number).join(".") : null;
+}
+
+const numbers = (version) => version.split(".").map(Number);
+function compare(a, b) {
+  for (let i = 0; i < Math.max(a.length, b.length); i++) if ((a[i] ?? 0) !== (b[i] ?? 0)) return (a[i] ?? 0) - (b[i] ?? 0);
+  return 0;
+}
+
+/** Whether `version` falls inside a PEP 440 specifier such as ">=0.12.5,<0.13". Throws on a clause it cannot read. */
+export function satisfies(version, specifier) {
+  const v = numbers(version);
+  return specifier.split(",").map((clause) => clause.trim()).filter(Boolean).every((clause) => {
+    const parsed = /^(~=|===|==|!=|<=|>=|<|>)\s*(\d+(?:\.\d+)*)(\.\*)?$/.exec(clause);
+    if (!parsed) throw new Error(`cannot read the version specifier \`${clause}\``);
+    const [, op, bound, wildcard] = parsed;
+    const b = numbers(bound);
+    if (wildcard) {
+      const same = compare(v.slice(0, b.length), b) === 0;
+      if (op === "==") return same;
+      if (op === "!=") return !same;
+      throw new Error(`\`${clause}\`: only == and != take a wildcard`);
+    }
+    const order = compare(v, b);
+    if (op === "~=") return b.length > 1 && order >= 0 && compare(v.slice(0, b.length - 1), b.slice(0, -1)) === 0;
+    return { "==": order === 0, "===": order === 0, "!=": order !== 0, "<=": order <= 0, ">=": order >= 0, "<": order < 0, ">": order > 0 }[op];
+  });
+}
+
+/** The lowest version a PEP 440 specifier admits through its `>=` or `~=` bound, or null when it has none. */
+export function specifierFloor(specifier) {
+  const floors = [...specifier.matchAll(/(?:>=|~=)\s*(\d+(?:\.\d+)*)/g)].map((m) => m[1]);
+  return floors.sort((a, b) => compare(numbers(b), numbers(a)))[0] ?? null;
+}
+
+/** A string value from one TOML table, read line by line: enough for the flat keys rule 17 compares. */
+export function tomlString(text, table, key) {
+  let current = "";
+  for (const line of text.split(/\r?\n/)) {
+    const header = /^\s*\[\[?\s*([^\]]+?)\s*\]\]?\s*(?:#.*)?$/.exec(line);
+    if (header) {
+      current = header[1];
+      continue;
+    }
+    const entry = /^\s*("[^"]*"|[\w.-]+)\s*=\s*(?:"([^"]*)"|'([^']*)')/.exec(line);
+    if (current === table && entry && entry[1].replaceAll('"', "") === key) return entry[2] ?? entry[3];
+  }
+  return null;
+}
+
+/** Parses JSON with comments and trailing commas, as devcontainer.json and tsconfig.json are written. */
+export function parseJsonc(text) {
+  // Two passes, each copying strings whole: comments go first, so a trailing comma is found even when a
+  // comment stands between it and the bracket.
+  const pass = (input, visit) => {
+    let out = "";
+    for (let i = 0; i < input.length; i++) {
+      if (input[i] === '"') {
+        let end = i + 1;
+        while (end < input.length && input[end] !== '"') end += input[end] === "\\" ? 2 : 1;
+        out += input.slice(i, end + 1);
+        i = end;
+      } else {
+        const skip = visit(input, i);
+        if (skip === null) out += input[i];
+        else [i, out] = [skip.to, out + skip.with];
+      }
+    }
+    return out;
+  };
+  const bare = pass(text, (input, i) => {
+    if (input.startsWith("//", i)) {
+      const end = input.indexOf("\n", i);
+      return { to: (end === -1 ? input.length : end) - 1, with: "" };
+    }
+    if (input.startsWith("/*", i)) {
+      const end = input.indexOf("*/", i + 2);
+      return { to: end === -1 ? input.length : end + 1, with: " " };
+    }
+    return null;
+  });
+  return JSON.parse(pass(bare, (input, i) => (input[i] === "," && /^\s*[}\]]/.test(input.slice(i + 1)) ? { to: i, with: "" } : null)));
+}
+
+/** The nearest declaration of a toolchain's version that governs `path`: its own directory or the closest above. */
+function governing(sources, path) {
+  const dir = path.includes("/") ? path.slice(0, path.lastIndexOf("/")) : "";
+  return sources
+    .filter((source) => source.dir === "" || dir === source.dir || dir.startsWith(`${source.dir}/`))
+    .sort((a, b) => b.dir.length - a.dir.length)[0];
+}
+
+/** The base images a Dockerfile names, as {line, name, tag}; stage aliases and `scratch` are left out. */
+function baseImages(text) {
+  const images = [];
+  const stages = new Set(["scratch"]);
+  text.split(/\r?\n/).forEach((line, i) => {
+    const from = /^\s*FROM\s+(.+)$/i.exec(line);
+    if (!from) return;
+    const [image = "", keyword, alias] = from[1].trim().split(/\s+/).filter((w) => !w.startsWith("--"));
+    const reference = image.split("@")[0];
+    const colon = reference.lastIndexOf(":");
+    const named = colon > reference.lastIndexOf("/") ? reference.slice(0, colon) : reference;
+    if (!stages.has(image.toLowerCase())) images.push({ line: i + 1, name: named.split("/").at(-1).toLowerCase(), tag: colon > reference.lastIndexOf("/") ? reference.slice(colon + 1) : null });
+    if (keyword?.toLowerCase() === "as" && alias) stages.add(alias.toLowerCase());
+  });
+  return images;
+}
+
+/**
+ * Rule 17. `tracked` are the files present; `read` returns one's text. Every copy of a toolchain
+ * version, and every tool version the Dev Container installs, is compared with its one declaration.
+ */
+export function checkVersions(tracked, read) {
+  const failures = [];
+  const json = (path) => {
+    try {
+      return JSON.parse(read(path));
+    } catch {
+      return null; // rule 4 reports it
+    }
+  };
+  const sources = Object.fromEntries(Object.entries(TOOLCHAIN_VERSIONS).map(([name, toolchain]) => [
+    name,
+    tracked.filter((path) => toolchain.file.test(path)).map((path) => {
+      const at = path.lastIndexOf("/");
+      const declared = toolchain.read(read(path));
+      const version = leadingVersion(declared, toolchain.parts);
+      if (version === null) failures.push(`\`${path}\` declares \`${declared}\`, which is not a ${toolchain.name} version this rule can compare.`);
+      return { path, dir: at === -1 ? "" : path.slice(0, at), version };
+    }).filter((source) => source.version !== null),
+  ]));
+  const differs = (where, what, found, toolchain, source) =>
+    failures.push(`${where} ${what} ${found}, but \`${source.path}\` declares ${TOOLCHAIN_VERSIONS[toolchain].name} ${source.version}. Move every copy together (docs/toolchain-updates.md).`);
+
+  // Node: engines, the @types/node major, and every Node module's Biome.
+  const biome = new Map();
+  for (const path of tracked.filter((p) => /(^|\/)package\.json$/.test(p))) {
+    const manifest = json(path);
+    if (manifest === null) continue;
+    const node = governing(sources.node, path);
+    if (node && manifest.engines?.node !== undefined && leadingVersion(manifest.engines.node, 1) !== node.version) {
+      differs(`\`${path}\``, "requires Node", `\`${manifest.engines.node}\``, "node", node);
+    }
+    for (const key of DEPENDENCY_KEYS) {
+      const types = manifest[key]?.["@types/node"];
+      if (node && types !== undefined && leadingVersion(types, 1) !== node.version) {
+        differs(`\`${path}\``, "types its code against @types/node", `\`${types}\``, "node", node);
+      }
+      const lint = manifest[key]?.["@biomejs/biome"];
+      if (lint !== undefined) biome.set(path, lint);
+    }
+  }
+  if (new Set(biome.values()).size > 1) {
+    failures.push(`Biome is pinned at different versions: ${[...biome].map(([path, version]) => `\`${version}\` in \`${path}\``).join(", ")}. Every Node module lints and formats with one Biome, so pin one version everywhere.`);
+  }
+
+  // Base images: a toolchain's official image runs the version its governing declaration names.
+  for (const path of tracked.filter((p) => /(^|\/)Dockerfile$/.test(p))) {
+    for (const { line, name, tag } of baseImages(read(path))) {
+      const [toolchain, spec] = Object.entries(TOOLCHAIN_VERSIONS).find(([, t]) => t.image === name) ?? [];
+      const source = toolchain && governing(sources[toolchain], path);
+      if (source && leadingVersion(tag, spec.parts) !== source.version) differs(`\`${path}:${line}\``, `builds on ${name}`, tag === null ? "with no tag" : `\`${tag}\``, toolchain, source);
+    }
+  }
+
+  // Python: .python-version inside requires-python, mypy checking against its floor, uv inside required-version.
+  const tools = tracked.includes(TOOLS_PATH) ? json(TOOLS_PATH)?.tools ?? {} : {};
+  for (const path of tracked.filter((p) => /(^|\/)pyproject\.toml$/.test(p))) {
+    const text = read(path);
+    const requires = tomlString(text, "project", "requires-python");
+    const mypy = tomlString(text, "tool.mypy", "python_version");
+    const uvRange = tomlString(text, "tool.uv", "required-version");
+    const python = governing(sources.python, path);
+    try {
+      if (requires !== null && python && !satisfies(python.version, requires)) {
+        failures.push(`\`${python.path}\` declares Python ${python.version}, outside \`${path}\`'s requires-python \`${requires}\`.`);
+      }
+      const floor = requires === null ? null : specifierFloor(requires);
+      if (mypy !== null && leadingVersion(mypy, 2) !== leadingVersion(floor, 2)) {
+        failures.push(`\`${path}\` type-checks against Python ${mypy} ([tool.mypy] python_version), but its requires-python floor is ${floor ?? "not stated"}. mypy checks the oldest Python the package supports.`);
+      }
+      if (uvRange !== null && tools.uv && !satisfies(tools.uv.version, uvRange)) {
+        failures.push(`\`${TOOLS_PATH}\` pins uv ${tools.uv.version}, outside \`${path}\`'s required-version \`${uvRange}\`, so the pinned uv refuses to run.`);
+      }
+    } catch (err) {
+      failures.push(`\`${path}\`: ${err.message}.`);
+    }
+  }
+
+  // The Dev Container: each toolchain feature at the declared version, each tool at its pin, and nothing unpinned.
+  for (const path of tracked.filter((p) => DEVCONTAINER.test(p))) {
+    let features;
+    try {
+      features = parseJsonc(read(path)).features ?? {};
+    } catch (err) {
+      failures.push(`\`${path}\` does not parse: ${err.message}`);
+      continue;
+    }
+    for (const [id, value] of Object.entries(features)) {
+      const feature = id.split("@")[0].replace(/:[^/:]*$/, "").split("/").at(-1);
+      const options = typeof value === "string" ? { version: value } : value ?? {};
+      const [toolchain, spec] = Object.entries(TOOLCHAIN_VERSIONS).find(([, t]) => t.feature === feature) ?? [];
+      for (const source of toolchain ? sources[toolchain] : []) {
+        if (leadingVersion(options.version, spec.parts) !== source.version) differs(`\`${path}\``, `installs ${spec.name} through \`${id}\` at`, options.version === undefined ? "the feature's default" : `\`${options.version}\``, toolchain, source);
+      }
+      for (const [name, tool] of Object.entries(tools)) {
+        const option = tool.devcontainer?.[feature];
+        if (option !== undefined && options[option] !== tool.version) {
+          failures.push(`\`${path}\` installs ${name} through \`${id}\` at ${options[option] === undefined ? "the feature's default (latest)" : `\`${options[option]}\``}, but \`${TOOLS_PATH}\` pins ${tool.version}. Set \`${option}\` to ${tool.version}.`);
+        }
+      }
+      // The python feature pipx-installs a list of tools (uv among them, when asked) at whatever is newest.
+      if (feature === TOOLCHAIN_VERSIONS.python.feature && options.installTools !== false) {
+        failures.push(`\`${path}\` lets \`${id}\` install its own tools, at unpinned versions. Set \`"installTools": false\`: uv comes from \`${TOOLS_PATH}\`, and the rest from each module's lockfile.`);
+      }
+    }
+  }
+  return failures;
 }
 
 export const containsDir = (path, dir) => path === dir || path.startsWith(`${dir}/`) || path.includes(`/${dir}/`);
@@ -427,9 +726,12 @@ export function checkRepoHygiene(root = process.cwd()) {
     if (leftovers.length > 0) failures.push(`template marker line(s) survived initialization: ${leftovers.join(", ")}.`);
   }
 
-  for (const path of present.filter((p) => WORKFLOW.test(p))) failures.push(...checkDownloads(path, read(path)), ...checkWorkflow(path, read(path)));
+  for (const path of present.filter((p) => WORKFLOW.test(p))) {
+    failures.push(...checkDownloads(path, read(path)), ...checkPins(path, read(path)), ...checkWorkflow(path, read(path)));
+  }
   for (const path of present.filter((p) => /(^|\/)Dockerfile$/.test(p))) failures.push(...checkDigests(path, read(path)), ...checkInstalls(path, read(path)));
   failures.push(...checkModules(tracked, read));
+  failures.push(...checkVersions(present, read));
 
   if (present.includes(GATE)) failures.push(...checkGate(GATE, read(GATE)));
 

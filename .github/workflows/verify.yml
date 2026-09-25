@@ -5,6 +5,9 @@
 # editing protection rules — and never leaves pull requests waiting for a check that no longer runs.
 # A new job must also be listed under `verify.needs`, or it is not part of the gate.
 #
+# Every module job is its checkout and .github/actions/module, which reads the module's module.json and
+# runs the same scripts/verify.mjs a contributor runs, so CI and local verify check the same things.
+#
 # Third-party actions are pinned to a commit SHA with the version in a trailing comment. A tag can
 # be repointed at different code with no diff in this repository (tj-actions/changed-files, March
 # 2025); a SHA cannot. Dependabot bumps SHA and comment together, and scripts/check-hygiene.mjs
@@ -27,6 +30,7 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  # Hygiene, documentation and the chassis's own tests, as `verify.mjs --no-modules` runs them locally.
   chassis:
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -37,16 +41,7 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version-file: .node-version
-      - name: Repository hygiene
-        run: node scripts/check-hygiene.mjs
-      - name: Documentation shape
-        run: node scripts/check-docs.mjs
-      - name: Chassis tests
-        run: node --test "test/*.test.mjs"
-      # ultra:begin template
-      - name: Template tests
-        run: node --test "template/*.test.mjs"
-      # ultra:end template
+      - run: node scripts/verify.mjs --no-modules
 
   # The chassis is written to run on Windows too (no make, no symlinks, npm through a shell), and a
   # claim nothing runs is a claim nobody keeps. Only the chassis: the modules' own toolchains are
@@ -61,16 +56,37 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version-file: .node-version
-      - name: Repository hygiene
-        run: node scripts/check-hygiene.mjs
-      - name: Documentation shape
-        run: node scripts/check-docs.mjs
-      - name: Chassis tests
-        run: node --test "test/*.test.mjs"
-      # ultra:begin template
-      - name: Template tests
-        run: node --test "template/*.test.mjs"
-      # ultra:end template
+      - run: node scripts/verify.mjs --no-modules
+
+  # scripts/agent-env.mjs prepares a coding agent's cloud session, and may run on a Node older than
+  # .node-version names, since it is what installs that one. This runs it there, from nothing, then checks
+  # the chassis with only what it set up on PATH.
+  agent-env:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .node-version
+      - name: The oldest Node it runs on
+        id: oldest
+        run: echo "node=$(node scripts/agent-env.mjs --oldest-node)" >> "$GITHUB_OUTPUT"
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ steps.oldest.outputs.node }}
+      - name: Prepare a session, then verify the chassis with only what it set up
+        env:
+          CLAUDE_ENV_FILE: ${{ runner.temp }}/claude-env
+        run: |
+          node --version
+          node scripts/agent-env.mjs --force
+          # The file is written by the line above, so shellcheck cannot follow it.
+          # shellcheck source=/dev/null
+          . "$CLAUDE_ENV_FILE"
+          node scripts/verify.mjs --no-modules
 
   actionlint:
     runs-on: ubuntu-latest
@@ -79,7 +95,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: ./.github/actions/setup-actionlint
+      - uses: ./.github/actions/tool
+        with:
+          names: actionlint
       - run: actionlint -color
 
   # zizmor audits the workflows for security rather than syntax: template injection, dangerous
@@ -92,7 +110,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: ./.github/actions/setup-zizmor
+      - uses: ./.github/actions/tool
+        with:
+          names: zizmor
       - run: zizmor .
         env:
           GH_TOKEN: ${{ github.token }}
@@ -101,249 +121,91 @@ jobs:
   go-service:
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    defaults:
-      run:
-        working-directory: services/api-go
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      - uses: ./.github/actions/module
         with:
-          go-version-file: services/api-go/go.mod
-          cache-dependency-path: services/api-go/go.mod
-      - name: go.mod is tidy
-        run: go mod tidy -diff
-      - name: gofmt
-        run: |
-          unformatted="$(gofmt -l .)"
-          if [ -n "$unformatted" ]; then echo "Not gofmt-formatted:"; echo "$unformatted"; exit 1; fi
-      - run: go vet ./...
-      - run: go test -race -coverprofile="$RUNNER_TEMP/coverage.out" ./...
-      - name: Coverage (report-only, never a gate)
-        run: |
-          { echo "| Module | Lines covered | Covered of total |"; echo "|---|---|---|"; node ../../scripts/coverage-summary.mjs go-service "$RUNNER_TEMP/coverage.out"; } >> "$GITHUB_STEP_SUMMARY"
-      - uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
-        with:
-          version: v2.13.2
-          working-directory: services/api-go
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version-file: .node-version
-      - name: The task API contract
-        run: node ../../scripts/check-contract.mjs go-service
-      # Building an image proves little; this starts it and asks it the one question a load balancer will.
-      - name: Container image starts and answers
-        run: |
-          docker build --tag api-go:ci .
-          trap 'docker rm --force api-go > /dev/null 2>&1 || true' EXIT
-          docker run --detach --name api-go --publish 8080:8080 api-go:ci
-          for _ in $(seq 1 30); do
-            if curl --fail --silent --show-error localhost:8080/healthz; then exit 0; fi
-            sleep 1
-          done
-          docker logs api-go
-          exit 1
+          id: go-service
   # ultra:end go-service
 
   # ultra:begin ts-service
   ts-service:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
-    defaults:
-      run:
-        working-directory: services/api-ts
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: ./.github/actions/module
         with:
-          node-version-file: .node-version
-          cache: npm
-          cache-dependency-path: services/api-ts/package-lock.json
-      - run: npm ci --ignore-scripts
-      - run: npm audit signatures
-      - run: npm run verify
-      - name: Coverage (report-only, never a gate)
-        run: |
-          npm run --silent coverage > /dev/null
-          { echo "| Module | Lines covered | Covered of total |"; echo "|---|---|---|"; node ../../scripts/coverage-summary.mjs ts-service coverage/lcov.info; } >> "$GITHUB_STEP_SUMMARY"
-      - name: The task API contract
-        run: node ../../scripts/check-contract.mjs ts-service
-      # Building an image proves little; this starts it and asks it the one question a load balancer will.
-      - name: Container image starts and answers
-        run: |
-          docker build --tag api-ts:ci .
-          trap 'docker rm --force api-ts > /dev/null 2>&1 || true' EXIT
-          docker run --detach --name api-ts --publish 8080:8080 api-ts:ci
-          for _ in $(seq 1 30); do
-            if curl --fail --silent --show-error localhost:8080/healthz; then exit 0; fi
-            sleep 1
-          done
-          docker logs api-ts
-          exit 1
+          id: ts-service
   # ultra:end ts-service
 
   # ultra:begin mcp-server
   mcp-server:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
-    defaults:
-      run:
-        working-directory: services/mcp-server
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: ./.github/actions/module
         with:
-          node-version-file: .node-version
-          cache: npm
-          cache-dependency-path: services/mcp-server/package-lock.json
-      - run: npm ci --ignore-scripts
-      - run: npm audit signatures
-      - run: npm run verify
-      - name: Coverage (report-only, never a gate)
-        run: |
-          npm run --silent coverage > /dev/null
-          { echo "| Module | Lines covered | Covered of total |"; echo "|---|---|---|"; node ../../scripts/coverage-summary.mjs mcp-server coverage/lcov.info; } >> "$GITHUB_STEP_SUMMARY"
-      - name: The task rules
-        run: node ../../scripts/check-rules.mjs mcp-server
-      - name: Container image starts and speaks MCP
-        run: |
-          docker build --tag mcp-server:ci .
-          request='{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"ci","version":"0"}}}'
-          reply="$(echo "$request" | timeout 60 docker run --rm -i mcp-server:ci)"
-          echo "$reply"
-          echo "$reply" | grep -q '"serverInfo"'
+          id: mcp-server
   # ultra:end mcp-server
 
   # ultra:begin py-service
   py-service:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
-    defaults:
-      run:
-        working-directory: services/api-py
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+      - uses: ./.github/actions/module
         with:
-          # The uv version is pinned once, in [tool.uv] required-version, which local uv enforces too.
-          version-file: services/api-py/pyproject.toml
-          enable-cache: true
-          cache-dependency-glob: services/api-py/uv.lock
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version-file: .node-version
-      # --locked refuses a lockfile that no longer matches pyproject.toml, as npm ci does; --frozen
-      # would install the stale lock without a word. Later steps use --frozen so nothing re-locks.
-      - run: uv sync --locked
-      - run: uv run --frozen ruff check .
-      - run: uv run --frozen ruff format --check .
-      - run: uv run --frozen mypy
-      - run: uv run --frozen coverage run -m pytest
-      - name: Coverage (report-only, never a gate)
-        run: |
-          uv run --frozen coverage lcov -o coverage/lcov.info
-          { echo "| Module | Lines covered | Covered of total |"; echo "|---|---|---|"; node ../../scripts/coverage-summary.mjs py-service coverage/lcov.info; } >> "$GITHUB_STEP_SUMMARY"
-      - run: uv run --frozen python scripts/check_boundaries.py
-      - name: The task API contract
-        run: node ../../scripts/check-contract.mjs py-service
-      # Building an image proves little; this starts it and asks it the one question a load balancer will.
-      - name: Container image starts and answers
-        run: |
-          docker build --tag api-py:ci .
-          trap 'docker rm --force api-py > /dev/null 2>&1 || true' EXIT
-          docker run --detach --name api-py --publish 8080:8080 api-py:ci
-          for _ in $(seq 1 30); do
-            if curl --fail --silent --show-error localhost:8080/healthz; then exit 0; fi
-            sleep 1
-          done
-          docker logs api-py
-          exit 1
+          id: py-service
   # ultra:end py-service
 
   # ultra:begin web
   web:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
-    defaults:
-      run:
-        working-directory: apps/web
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: ./.github/actions/module
         with:
-          node-version-file: .node-version
-          cache: npm
-          cache-dependency-path: apps/web/package-lock.json
-      - run: npm ci --ignore-scripts
-      - run: npm audit signatures
-      - run: npm run verify
-      - name: Coverage (report-only, never a gate)
-        run: |
-          npm run --silent coverage > /dev/null
-          { echo "| Module | Lines covered | Covered of total |"; echo "|---|---|---|"; node ../../scripts/coverage-summary.mjs web coverage/lcov.info; } >> "$GITHUB_STEP_SUMMARY"
-      - name: The task rules
-        run: node ../../scripts/check-rules.mjs web
+          id: web
   # ultra:end web
 
   # ultra:begin ts-library
   ts-library:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
-    defaults:
-      run:
-        working-directory: packages/ts-library
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: ./.github/actions/module
         with:
-          node-version-file: .node-version
-          cache: npm
-          cache-dependency-path: packages/ts-library/package-lock.json
-      - run: npm ci --ignore-scripts
-      - run: npm audit signatures
-      - run: npm run verify
-      - name: Coverage (report-only, never a gate)
-        run: |
-          npm run --silent coverage > /dev/null
-          { echo "| Module | Lines covered | Covered of total |"; echo "|---|---|---|"; node ../../scripts/coverage-summary.mjs ts-library coverage/lcov.info; } >> "$GITHUB_STEP_SUMMARY"
-      - name: The task rules
-        run: node ../../scripts/check-rules.mjs ts-library
+          id: ts-library
   # ultra:end ts-library
 
   # ultra:begin architecture
   architecture:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
-    defaults:
-      run:
-        working-directory: architecture
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: ./.github/actions/module
         with:
-          node-version-file: .node-version
-          cache: npm
-          cache-dependency-path: architecture/package-lock.json
-      - run: npm ci --ignore-scripts
-      - run: npm audit signatures
-      - run: npm run verify
-      - name: Coverage (report-only, never a gate)
-        run: |
-          npm run --silent coverage > /dev/null
-          { echo "| Module | Lines covered | Covered of total |"; echo "|---|---|---|"; node ../scripts/coverage-summary.mjs architecture coverage/lcov.info; } >> "$GITHUB_STEP_SUMMARY"
+          id: architecture
   # ultra:end architecture
 
   verify:
@@ -351,6 +213,7 @@ jobs:
     needs:
       - chassis
       - chassis-windows
+      - agent-env
       - actionlint
       - zizmor
       # ultra:begin go-service

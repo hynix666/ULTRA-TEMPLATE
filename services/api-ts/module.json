@@ -1,0 +1,8 @@
+{
+  "id": "ts-service",
+  "toolchain": "node",
+  "checks": [{ "name": "npm run verify", "run": ["npm", "run", "verify"] }],
+  "coverage": { "run": [["npm", "run", "--silent", "coverage"]], "report": "coverage/lcov.info" },
+  "taskApi": { "run": ["node", "src/main.ts"] },
+  "image": "http"
+}

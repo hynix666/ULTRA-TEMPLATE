@@ -1,0 +1,13 @@
+{
+  "id": "architecture",
+  "toolchain": "node",
+  "checks": [
+    { "name": "npm run verify", "run": ["npm", "run", "verify"] },
+    {
+      "name": "the model draws every module here",
+      "run": ["node", "../scripts/check-architecture.mjs", "model"],
+      "why": "AGENTS.md asks for the model to change with the structure; this is what holds it to that"
+    }
+  ],
+  "coverage": { "run": [["npm", "run", "--silent", "coverage"]], "report": "coverage/lcov.info" }
+}

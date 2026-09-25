@@ -5,6 +5,8 @@ package entity
 
 import (
 	"errors"
+	"fmt"
+	"slices"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -20,15 +22,18 @@ const (
 	StatusDone       Status = "done"
 )
 
+// statuses lists every status in lifecycle order: ParseStatus accepts these and nothing else.
+var statuses = []Status{StatusTodo, StatusInProgress, StatusDone}
+
 // MaxTitleLength bounds a title, counted in characters rather than bytes.
 const MaxTitleLength = 200
 
 // Domain errors. Transports map them to their own error shapes; nothing here knows which
-// transport is asking.
+// transport is asking. A message that states a rule is built from it, so the two cannot differ.
 var (
 	ErrEmptyTitle        = errors.New("title must not be empty")
-	ErrTitleTooLong      = errors.New("title must be at most 200 characters")
-	ErrUnknownStatus     = errors.New("status must be one of todo, in_progress, done")
+	ErrTitleTooLong      = fmt.Errorf("title must be at most %d characters", MaxTitleLength)
+	ErrUnknownStatus     = fmt.Errorf("status must be one of %s", statusNames())
 	ErrInvalidTransition = errors.New("status transition not allowed")
 	ErrNotFound          = errors.New("task not found")
 )
@@ -59,12 +64,20 @@ func NewTask(id, title string, now time.Time) (Task, error) {
 
 // ParseStatus converts external input into a Status.
 func ParseStatus(s string) (Status, error) {
-	switch status := Status(s); status {
-	case StatusTodo, StatusInProgress, StatusDone:
+	if status := Status(s); slices.Contains(statuses, status) {
 		return status, nil
-	default:
-		return "", ErrUnknownStatus
 	}
+
+	return "", ErrUnknownStatus
+}
+
+func statusNames() string {
+	names := make([]string, len(statuses))
+	for i, status := range statuses {
+		names[i] = string(status)
+	}
+
+	return strings.Join(names, ", ")
 }
 
 // Transition returns a copy of t moved to next, or ErrInvalidTransition.

@@ -14,7 +14,6 @@ import os
 import secrets
 import signal
 import socketserver
-import sys
 import threading
 import time
 from datetime import UTC, datetime
@@ -86,7 +85,7 @@ def serve(config: Config) -> None:
     signal.signal(signal.SIGINT, stop)
     signal.signal(signal.SIGTERM, stop)
 
-    log({"level": "info", "msg": "listening", "port": config.port})
+    log({"level": "info", "msg": "listening", "port": config.port, "shutdownTimeoutMs": config.shutdown_timeout_ms})
     server.serve_forever()
 
     # server_close waits for in-flight requests; the timeout bounds how long, as it does in api-go.
@@ -101,7 +100,7 @@ def run() -> int:
     try:
         config = load_config(os.environ)
     except ConfigError as err:
-        print(f"api-py: {err}", file=sys.stderr)
+        log({"level": "error", "msg": "invalid configuration", "error": str(err)})
         return 2
     serve(config)
     return 0

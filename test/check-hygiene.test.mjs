@@ -11,11 +11,18 @@ import {
   checkDownloads,
   checkGate,
   checkModules,
+  checkPins,
   checkRepoHygiene,
+  checkVersions,
   checkWorkflow,
   jobIds,
+  leadingVersion,
   MAX_TRACKED_BYTES,
+  parseJsonc,
   REQUIRED_IGNORES,
+  satisfies,
+  specifierFloor,
+  tomlString,
 } from "../scripts/check-hygiene.mjs";
 
 const IGNORE = [...REQUIRED_IGNORES, "!.env.example", "build/", "*.tsbuildinfo", ".DS_Store", ".idea/", "*.local"].join("\n");
@@ -171,35 +178,66 @@ test("an absolute path into a home directory fails; container paths, placeholder
   assert.doesNotMatch(found, /fine\.md|devcontainer\.json|compose\.yml/);
 });
 
-test("a module present without its lockfile or its verify script fails; a complete one passes", () => {
-  const manifest = (scripts) => JSON.stringify({ scripts });
-  const read = (path) => ({
-    "services/api-ts/package.json": manifest({ verify: "npm test" }),
-    "apps/web/package.json": manifest({ test: "vitest run" }),
-  })[path];
+// A node module's manifest and package.json, as module.json and npm would write them.
+const nodeModule = (id, scripts = { verify: "npm test" }, extra = {}) => ({
+  manifest: JSON.stringify({ id, toolchain: "node", checks: [{ name: "npm run verify", run: ["npm", "run", "verify"] }], ...extra }),
+  pkg: JSON.stringify({ scripts }),
+});
 
-  const complete = ["services/api-ts/package.json", "services/api-ts/package-lock.json", "services/api-ts/src/main.ts"];
+test("a module missing its lockfile, or a script its manifest runs, fails; a complete one passes", () => {
+  const api = nodeModule("ts-service");
+  const web = nodeModule("web", { test: "vitest run" });
+  const py = JSON.stringify({ id: "py-service", toolchain: "python", checks: [{ name: "pytest", run: ["uv", "run", "pytest"] }] });
+  const files = {
+    "services/api-ts/module.json": api.manifest,
+    "services/api-ts/package.json": api.pkg,
+    "apps/web/module.json": web.manifest,
+    "apps/web/package.json": web.pkg,
+    "services/api-py/module.json": py,
+  };
+  const read = (path) => files[path];
+
+  const complete = ["services/api-ts/module.json", "services/api-ts/package.json", "services/api-ts/package-lock.json", "services/api-ts/src/main.ts"];
   assert.deepEqual(checkModules(complete, read), []);
   assert.match(checkModules(complete.filter((p) => !p.endsWith("lock.json")), read).join(), /api-ts` is present but does not track `package-lock\.json`/);
   assert.match(
-    checkModules(["apps/web/package.json", "apps/web/package-lock.json"], read).join(),
-    /apps\/web\/package\.json` has no `verify` script/,
+    checkModules(["apps/web/module.json", "apps/web/package.json", "apps/web/package-lock.json"], read).join(),
+    /apps\/web\/module\.json` runs `npm run verify`, which `apps\/web\/package\.json` does not define/,
   );
-  assert.match(
-    checkModules(["services/api-py/pyproject.toml", "services/api-py/src/main.py"], read).join(),
-    /api-py` is present but does not track `uv\.lock`/,
-  );
-  // A module that is not there is not a missing lockfile.
+  assert.match(checkModules(["services/api-py/module.json", "services/api-py/pyproject.toml"], read).join(), /api-py` is present but does not track `uv\.lock`/);
+  // A directory with no module in it is not a missing lockfile.
   assert.deepEqual(checkModules(["README.md"], read), []);
 });
 
-test("a module present without its CI job or its Dependabot entry fails; wiring read only when tracked", () => {
+test("a malformed manifest, a repeated module name, and a module no manifest declares all fail", () => {
   const files = {
-    "services/api-ts/package.json": JSON.stringify({ scripts: { verify: "npm test" } }),
+    "a/module.json": JSON.stringify({ id: "Bad Id", toolchain: "cobol", checks: [], colour: "red" }),
+    "b/module.json": nodeModule("same").manifest,
+    "b/package.json": nodeModule("same").pkg,
+    "c/module.json": nodeModule("same").manifest,
+    "c/package.json": nodeModule("same").pkg,
+  };
+  const read = (path) => files[path];
+  const found = checkModules(Object.keys(files).concat(["b/package-lock.json", "c/package-lock.json", "tools/gen/go.mod", "package.json"]), read).join("\n");
+  assert.match(found, /a\/module\.json: unknown key `colour`/);
+  assert.match(found, /a\/module\.json: `id` must be lowercase/);
+  assert.match(found, /a\/module\.json: `toolchain` must be one of/);
+  assert.match(found, /a\/module\.json: `checks` must list at least one check/);
+  assert.match(found, /`c\/module\.json` and `b\/module\.json` both name the module `same`/);
+  assert.match(found, /`tools\/gen\/go\.mod` looks like a module, but no `module\.json` declares it/);
+  // The repository's own package.json names scripts; it is no module.
+  assert.doesNotMatch(found, /`package\.json` looks like a module/);
+});
+
+test("a module present without its CI job or its Dependabot entry fails; wiring read only when tracked", () => {
+  const api = nodeModule("ts-service");
+  const files = {
+    "services/api-ts/module.json": api.manifest,
+    "services/api-ts/package.json": api.pkg,
     ".github/workflows/verify.yml": "jobs:\n  chassis:\n    timeout-minutes: 5\n  ts-service:\n    timeout-minutes: 5\n",
     ".github/dependabot.yml": "updates:\n  - package-ecosystem: npm\n    directory: /services/api-ts\n",
   };
-  const module = ["services/api-ts/package.json", "services/api-ts/package-lock.json"];
+  const module = ["services/api-ts/module.json", "services/api-ts/package.json", "services/api-ts/package-lock.json"];
   const wiring = [".github/workflows/verify.yml", ".github/dependabot.yml"];
   const read = (overrides = {}) => (path) => ({ ...files, ...overrides })[path];
 
@@ -293,4 +331,152 @@ test("a directory that is not a git repository is fatal", (t) => {
   t.after(() => rmSync(root, { recursive: true, force: true }));
   writeFileSync(join(root, ".gitignore"), IGNORE);
   assert.match(checkRepoHygiene(root).fatal ?? "", /git repository/);
+});
+
+test("rule 16: a version written into a workflow fails; one read from the manifest or a file does not", () => {
+  const workflow = [
+    "env:",
+    '  SHELLCHECK_VERSION: "0.10.0"',
+    "  # TOOL_VERSION: \"1.0.0\" in a comment is not a pin",
+    "steps:",
+    "  - uses: actions/setup-node@0000000000000000000000000000000000000000 # v7.0.0",
+    "    with:",
+    "      node-version: 24",
+    "  - run: go run example.com/tool@v1.2.3 ./...",
+    "  - run: uvx tool==4.5.6",
+    "  - run: curl -o x https://github.com/o/r/releases/download/v1.0.0/x.tgz",
+    "  - uses: golangci/golangci-lint-action@0000000000000000000000000000000000000000 # v9.3.0",
+    "    with:",
+    "      version: v2.13.2",
+    "  - run: node scripts/tools.mjs install actionlint",
+    "  - uses: astral-sh/setup-uv@0000000000000000000000000000000000000000 # v10.1.0",
+    "    with:",
+    "      version: ${{ steps.uv.outputs.version }}",
+    "      node-version-file: .node-version",
+  ].join("\n");
+  const found = checkPins("ci.yml", workflow);
+  assert.deepEqual(found.map((f) => f.split(" ")[0]), ["ci.yml:2", "ci.yml:7", "ci.yml:8", "ci.yml:9", "ci.yml:10", "ci.yml:13"]);
+  assert.match(found[0], /a tool version in an environment variable/);
+  assert.match(found[1], /a toolchain version/);
+});
+
+
+// Rule 17 over an in-memory repository in which every copy agrees; each test changes one thing.
+const DIGEST = `@sha256:${"a".repeat(64)}`;
+const AGREEING = {
+  ".node-version": "24\n",
+  "package.json": JSON.stringify({ engines: { node: ">=24" } }),
+  "apps/web/package.json": JSON.stringify({ engines: { node: ">=24" }, devDependencies: { "@types/node": "^24.1.0", "@biomejs/biome": "2.5.14" } }),
+  "services/api-ts/package.json": JSON.stringify({ engines: { node: ">=24" }, devDependencies: { "@types/node": "^24.13.5", "@biomejs/biome": "2.5.14" } }),
+  "services/api-ts/Dockerfile": `FROM node:24-alpine${DIGEST}\n`,
+  "services/api-go/go.mod": "module example.test/api\n\ngo 1.26.1\n",
+  "services/api-go/Dockerfile": `FROM --platform=$BUILDPLATFORM golang:1.26-alpine${DIGEST} AS build\nFROM gcr.io/distroless/static-debian13:nonroot${DIGEST}\nCOPY --from=build /api /api\n`,
+  "services/api-py/.python-version": "3.14\n",
+  "services/api-py/pyproject.toml": '[project]\nrequires-python = ">=3.13"\n\n[tool.uv]\nrequired-version = ">=0.12.5,<0.13"\n\n[tool.mypy]\npython_version = "3.13"\n',
+  "services/api-py/Dockerfile": `FROM python:3.14-slim${DIGEST}\n`,
+  "scripts/tools/tools.json": JSON.stringify({ tools: { uv: { version: "0.12.18" }, "golangci-lint": { version: "2.13.2", devcontainer: { go: "golangciLintVersion" } } } }),
+  ".devcontainer/devcontainer.json": `{
+  // Comments and trailing commas, as the real file may have them.
+  "features": {
+    "ghcr.io/devcontainers/features/go:1": { "version": "1.26", "golangciLintVersion": "2.13.2" },
+    "ghcr.io/devcontainers/features/python:1": { "version": "3.14", "installTools": false },
+    "ghcr.io/devcontainers/features/node:2": "24",
+  },
+}`,
+};
+const versions = (changes = {}) => {
+  const files = { ...AGREEING, ...changes };
+  const present = Object.keys(files).filter((path) => files[path] !== null);
+  return checkVersions(present, (path) => files[path]);
+};
+const devcontainer = (from, to) => ({ ".devcontainer/devcontainer.json": AGREEING[".devcontainer/devcontainer.json"].replace(from, to) });
+
+test("rule 17: toolchain copies that agree with their declarations pass", () => {
+  assert.deepEqual(versions(), []);
+});
+
+test("rule 17: changing .node-version alone names every copy still on the old major", () => {
+  const found = versions({ ".node-version": "26.1.0\n" });
+  for (const copy of [
+    /`package\.json` requires Node `>=24`, but `\.node-version` declares Node 26/,
+    /`apps\/web\/package\.json` requires Node/,
+    /`services\/api-ts\/package\.json` requires Node/,
+    /`apps\/web\/package\.json` types its code against @types\/node `\^24\.1\.0`/,
+    /`services\/api-ts\/package\.json` types its code against @types\/node/,
+    /`services\/api-ts\/Dockerfile:1` builds on node `24-alpine`/,
+    /`\.devcontainer\/devcontainer\.json` installs Node through `ghcr\.io\/devcontainers\/features\/node:2` at `24`/,
+  ]) {
+    assert.equal(found.filter((f) => copy.test(f)).length, 1, `expected one failure matching ${copy}, got:\n${found.join("\n")}`);
+  }
+  assert.equal(found.length, 7, found.join("\n"));
+});
+
+test("rule 17: a go.mod or .python-version moved alone fails at the image and the Dev Container", () => {
+  const go = versions({ "services/api-go/go.mod": "module example.test/api\n\ngo 1.27\n" }).join("\n");
+  assert.match(go, /`services\/api-go\/Dockerfile:1` builds on golang `1\.26-alpine`, but `services\/api-go\/go\.mod` declares Go 1\.27/);
+  assert.match(go, /installs Go through `ghcr\.io\/devcontainers\/features\/go:1` at `1\.26`/);
+  assert.doesNotMatch(go, /distroless|Dockerfile:2/, "an image that carries no toolchain is not compared");
+  const python = versions({ "services/api-py/.python-version": "3.15\n" }).join("\n");
+  assert.match(python, /`services\/api-py\/Dockerfile:1` builds on python `3\.14-slim`, but `services\/api-py\/\.python-version` declares Python 3\.15/);
+  assert.match(python, /installs Python through .* at `3\.14`/);
+  assert.match(versions({ "services/api-go/Dockerfile": `FROM golang${DIGEST}\n` }).join(), /Dockerfile:1` builds on golang with no tag/);
+});
+
+test("rule 17: Python outside requires-python, mypy off its floor, and uv outside required-version fail", () => {
+  const pyproject = AGREEING["services/api-py/pyproject.toml"];
+  assert.match(versions({ "services/api-py/.python-version": "3.12\n", "services/api-py/Dockerfile": `FROM python:3.12-slim${DIGEST}\n`, ...devcontainer('"3.14"', '"3.12"') }).join(), /declares Python 3\.12, outside `services\/api-py\/pyproject\.toml`'s requires-python `>=3\.13`/);
+  assert.match(versions({ "services/api-py/pyproject.toml": pyproject.replace('python_version = "3.13"', 'python_version = "3.14"') }).join(), /type-checks against Python 3\.14 \(\[tool\.mypy\] python_version\), but its requires-python floor is 3\.13/);
+  assert.match(versions({ "scripts/tools/tools.json": AGREEING["scripts/tools/tools.json"].replace("0.12.18", "0.13.0") }).join(), /pins uv 0\.13\.0, outside `services\/api-py\/pyproject\.toml`'s required-version `>=0\.12\.5,<0\.13`/);
+  assert.match(versions({ "services/api-py/pyproject.toml": pyproject.replace(">=0.12.5,<0.13", "0.12") }).join(), /cannot read the version specifier `0\.12`/);
+});
+
+test("rule 17: the Dev Container installs no tool at a version nothing pins", () => {
+  // The Dev Container as v1.1.0 shipped it: uv from the python feature's tool list, golangci-lint at latest.
+  const shipped = versions(devcontainer('{ "version": "3.14", "installTools": false }', '{ "version": "3.14", "toolsToInstall": "uv" }')).join();
+  assert.match(shipped, /lets `ghcr\.io\/devcontainers\/features\/python:1` install its own tools, at unpinned versions\. Set `"installTools": false`/);
+  assert.match(versions(devcontainer(', "golangciLintVersion": "2.13.2"', "")).join(), /installs golangci-lint through `ghcr\.io\/devcontainers\/features\/go:1` at the feature's default \(latest\), but `scripts\/tools\/tools\.json` pins 2\.13\.2/);
+  assert.match(versions(devcontainer('"golangciLintVersion": "2.13.2"', '"golangciLintVersion": "2.12.0"')).join(), /at `2\.12\.0`, but .* pins 2\.13\.2\. Set `golangciLintVersion` to 2\.13\.2/);
+  assert.match(versions(devcontainer('node:2": "24"', 'node:2": "lts"')).join(), /installs Node through .* at `lts`/);
+  assert.match(versions(devcontainer('node:2": "24"', 'node:2": {}')).join(), /installs Node through .* at the feature's default/);
+  assert.match(versions({ ".devcontainer/devcontainer.json": "{ features: }" }).join(), /devcontainer\.json` does not parse/);
+});
+
+test("rule 17: two Biome versions fail, naming each; a nested declaration governs only its own directory", () => {
+  const web = JSON.parse(AGREEING["apps/web/package.json"]);
+  web.devDependencies["@biomejs/biome"] = "2.5.13";
+  assert.match(versions({ "apps/web/package.json": JSON.stringify(web) }).join(), /Biome is pinned at different versions: `2\.5\.13` in `apps\/web\/package\.json`, `2\.5\.14` in `services\/api-ts\/package\.json`/);
+  // apps/web's own declaration governs apps/web, and nothing else in the repository; the Dev Container has
+  // one Node, so it must agree with every declaration and names the one it does not.
+  const nested = versions({ "apps/web/.node-version": "26\n" });
+  assert.equal(nested.length, 3, nested.join("\n"));
+  assert.ok(nested.every((f) => f.includes("`apps/web/.node-version` declares Node 26") && /apps\/web\/package\.json|devcontainer\.json/.test(f)), nested.join("\n"));
+  assert.match(versions({ "services/api-py/.python-version": "system\n" }).join(), /declares `system`, which is not a Python version this rule can compare/);
+  assert.deepEqual(versions({ "services/api-go/go.mod": null }).filter((f) => /golang|go through/.test(f)), [], "with no go.mod, nothing declares Go and nothing is compared");
+});
+
+test("rule 17's readers: versions, PEP 440 ranges, TOML tables and JSON with comments", () => {
+  assert.equal(leadingVersion(">=24.3", 1), "24");
+  assert.equal(leadingVersion("1.26-alpine", 2), "1.26");
+  assert.equal(leadingVersion("3", 2), null);
+  assert.equal(leadingVersion(undefined, 1), null);
+  assert.ok(satisfies("0.12.18", ">=0.12.5,<0.13"));
+  assert.ok(!satisfies("0.13.0", ">=0.12.5,<0.13"));
+  assert.ok(satisfies("3.14", ">=3.13") && !satisfies("3.12.9", ">=3.13"));
+  assert.ok(satisfies("1.4.2", "~=1.4.0") && !satisfies("1.5.0", "~=1.4.0") && satisfies("1.9", "~=1.4"));
+  assert.ok(satisfies("2.1.7", "==2.1.*") && !satisfies("2.2.0", "==2.1.*") && satisfies("2.2.0", "!=2.1.*"));
+  assert.throws(() => satisfies("1.0.0", ">=1.0,foo"), /cannot read the version specifier `foo`/);
+  assert.equal(specifierFloor(">=3.11,<4,>=3.13"), "3.13");
+  assert.equal(specifierFloor("<4"), null);
+  const toml = '[project]\nname = "x"\nrequires-python = ">=3.13"\n\n[tool.uv]\nrequired-version = \'>=0.12\'\n[tool.mypy]\npython_version = "3.13" # oldest\n';
+  assert.equal(tomlString(toml, "project", "requires-python"), ">=3.13");
+  assert.equal(tomlString(toml, "tool.uv", "required-version"), ">=0.12");
+  assert.equal(tomlString(toml, "tool.mypy", "python_version"), "3.13");
+  assert.equal(tomlString(toml, "tool.mypy", "requires-python"), null, "a key is read only from its own table");
+  assert.deepEqual(parseJsonc('{ // c\n "a": "http://x//y", /* b */ "b": [1, 2,], "c": "q\\"//",\n "d": {"e": 1, // last\n },\n}'), { a: "http://x//y", b: [1, 2], c: 'q"//', d: { e: 1 } });
+  assert.deepEqual(parseJsonc('{"a": ",}"}'), { a: ",}" });
+});
+
+test("rule 17 runs over the whole repository", (t) => {
+  const root = fixture(t, { ".node-version": "26\n", "package.json": JSON.stringify({ engines: { node: ">=24" } }) });
+  assert.match(failures(root), /`package\.json` requires Node `>=24`, but `\.node-version` declares Node 26/);
 });

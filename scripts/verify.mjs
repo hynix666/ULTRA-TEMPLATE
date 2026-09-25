@@ -4,29 +4,44 @@
  *
  *   node scripts/verify.mjs                  # the chassis and every module present
  *   node scripts/verify.mjs go-service web   # the chassis and only the modules named
+ *   node scripts/verify.mjs web --no-chassis # one module alone, as its CI job runs it
+ *   node scripts/verify.mjs --no-modules     # the chassis alone, as the chassis CI jobs run it
+ *   node scripts/verify.mjs --dry-run        # what would run, one tab-separated line per step
+ *
+ * The checks are each module's own, from its module.json: the CI job of a module runs this same
+ * script over the same manifest, so local runs and CI cannot drift apart (ADR-0014).
  *
  * A step that cannot run FAILS. A check that quietly does not run reads exactly like one that
  * passed, so a missing toolchain or missing dependencies is a red line with the fix in it, and so is a
- * Node whose major version differs from .node-version. Two exceptions are reported as SKIPPED by name,
- * and the go-service CI job always runs both: golangci-lint, a linter many machines lack, and Go's race
- * detector, which needs cgo and a C compiler.
+ * Node whose major version differs from .node-version. The exceptions are declared, never guessed: a
+ * check whose manifest names a `tool` that is not on PATH, or `requires` a condition this machine lacks
+ * (Go's race detector needs cgo and a C compiler), is reported as SKIPPED by name, and the module's CI
+ * job, which has both, always runs it: in GitHub Actions a skip is a failure, so a job that lost a tool
+ * cannot pass without running the check. So is each command a chassis tool's check `uses` when it is on
+ * PATH and quietly goes without otherwise (scripts/tools/tools.json): its pass covers less without it,
+ * and one pinned there at another version fails, as the tool itself would.
  *
  * Exit 0 everything passed · 1 something failed · 2 a module name that is unknown or not present.
  */
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-// ultra:begin go-service|ts-service|py-service
-import { TASK_SERVICES } from "./check-contract.mjs";
-// ultra:end go-service|ts-service|py-service
-// ultra:begin mcp-server|web|ts-library
-import { RULE_MODULES } from "./check-rules.mjs";
-// ultra:end mcp-server|web|ts-library
-import { available, checkNodeVersion, MODULES, presentModules, ROOT, run } from "./modules.mjs";
+import { parseArgs } from "node:util";
+import { available, checkNodeVersion, e2ePartner, ModuleError, presentModules, REQUIREMENTS, ROOT, run, skipOutcome, TOOLCHAINS } from "./modules.mjs";
+import { helperProblems, installedVersion, loadTools, TOOLS_FILE, versionProblem } from "./tools.mjs";
+
+const { values: flags, positionals: requested } = parseArgs({
+  allowPositionals: true,
+  options: { "no-chassis": { type: "boolean" }, "no-modules": { type: "boolean" }, "dry-run": { type: "boolean" } },
+});
 
 const results = [];
 const record = (name, status, note = "") => results.push({ name, status, note });
 
-function step(name, command, args, cwd = ROOT) {
+function step(name, [command, ...args], cwd = ROOT) {
+  if (flags["dry-run"]) {
+    console.log(`${name}\t${cwd === ROOT ? "." : cwd.slice(ROOT.length + 1).split("\\").join("/")}\t${[command, ...args].join(" ")}`);
+    return;
+  }
   console.log(`\n▶ ${name}`);
   const { status } = run(command, args, { cwd });
   record(name, status === 0 ? "pass" : "fail", status === 0 ? "" : `exit ${status}`);
@@ -36,94 +51,113 @@ function chassis() {
   // Every check below runs on this Node; on another major than CI's, a pass predicts nothing.
   const wrongNode = checkNodeVersion();
   record("chassis: node version", wrongNode === null ? "pass" : "fail", wrongNode ?? "");
-  step("chassis: hygiene", "node", ["scripts/check-hygiene.mjs"]);
-  step("chassis: docs", "node", ["scripts/check-docs.mjs"]);
+  step("chassis: hygiene", ["node", "scripts/check-hygiene.mjs"]);
+  step("chassis: docs", ["node", "scripts/check-docs.mjs"]);
   const suites = ["test/*.test.mjs"];
   if (existsSync(join(ROOT, "template"))) suites.push("template/*.test.mjs");
-  step("chassis: tests", "node", ["--test", ...suites]);
+  step("chassis: tests", ["node", "--test", ...suites]);
+  // The chassis tools (actionlint, zizmor) run in jobs of their own in CI; here they run when installed,
+  // and a different version than the pin fails rather than passing on rules CI does not apply.
+  for (const [name, tool] of Object.entries(pinnedTools())) {
+    if (tool.for !== "chassis" || !tool.check) continue;
+    const found = flags["dry-run"] ? tool.version : installedVersion(name, tools);
+    if (found === null) record(`chassis: ${name}`, "skipped", `not on PATH; its own CI job runs it, and node scripts/tools.mjs install ${name} installs it here`);
+    else if (versionProblem(name, found, tools)) record(`chassis: ${name}`, "fail", versionProblem(name, found, tools));
+    else {
+      // A helper at another version than its pin fails as the tool would, before the tool runs by its rules.
+      const helpers = flags["dry-run"] ? [] : helperProblems(tool, { tools });
+      if (!helpers.some((h) => h.wrong)) step(`chassis: ${name}`, tool.check);
+      for (const { helper, missing, wrong } of helpers) {
+        const fix = helper in tools ? `, and node scripts/tools.mjs install ${name} installs ${helper} here` : "";
+        const where = skipOutcome() === "fail" ? "this CI job must run them" : `CI runs them${fix}`;
+        if (missing) record(`chassis: ${name} with ${helper}`, skipOutcome(), `${helper} is not on PATH, so ${name} ran without the rules that need it; ${where}`);
+        else record(`chassis: ${name} with ${helper}`, "fail", wrong);
+      }
+    }
+  }
 }
 
-function nodeModule(module) {
-  const cwd = join(ROOT, module.dir);
-  if (!existsSync(join(cwd, "node_modules"))) {
-    record(`${module.id}: dependencies`, "fail", "not installed; run node scripts/setup.mjs");
+let tools = null;
+/** The hand-pinned tools, or none in a project that dropped scripts/tools/tools.json. */
+function pinnedTools() {
+  tools ??= existsSync(TOOLS_FILE) ? loadTools() : {};
+  return tools;
+}
+
+const elsewhere = (module) => (skipOutcome() === "fail" ? "this CI job must run it" : `the ${module.id} CI job runs it`);
+
+/** Runs one check from a module's manifest, as the manifest says: its command, and when it may be skipped. */
+function check(module, cwd, spec) {
+  const name = `${module.id}: ${spec.name}`;
+  if (spec.requires !== undefined && !flags["dry-run"] && !REQUIREMENTS[spec.requires](cwd)) {
+    if (spec.otherwise) step(`${module.id}: ${spec.otherwise.name}`, spec.otherwise.run, cwd);
+    record(name, skipOutcome(), `needs ${spec.requires}; ${elsewhere(module)}`);
     return;
   }
-  step(`${module.id}: npm run verify`, "npm", ["run", "verify"], cwd);
-}
-
-function pythonModule(module) {
-  const cwd = join(ROOT, module.dir);
-  if (!available("uv", ["--version"])) {
-    record(`${module.id}: toolchain`, "fail", "uv is not on PATH; install uv (astral.sh/uv) or remove the module");
+  if (spec.tool !== undefined && !flags["dry-run"] && !available(spec.tool, ["--version"])) {
+    record(name, skipOutcome(), `${spec.tool} is not on PATH; ${elsewhere(module)}`);
     return;
   }
-  // The lockfile is checked like go mod tidy -diff, and never rewritten: a plain `uv run` re-locks
-  // a stale uv.lock in place, so verify would pass locally on exactly the drift CI must refuse.
-  step(`${module.id}: uv.lock up to date`, "uv", ["lock", "--check"], cwd);
-  step(`${module.id}: ruff check`, "uv", ["run", "--frozen", "ruff", "check", "."], cwd);
-  step(`${module.id}: ruff format`, "uv", ["run", "--frozen", "ruff", "format", "--check", "."], cwd);
-  step(`${module.id}: mypy`, "uv", ["run", "--frozen", "mypy"], cwd);
-  step(`${module.id}: pytest`, "uv", ["run", "--frozen", "pytest"], cwd);
-  step(`${module.id}: check-boundaries`, "uv", ["run", "--frozen", "python", "scripts/check_boundaries.py"], cwd);
-}
-
-function goModule(module) {
-  const cwd = join(ROOT, module.dir);
-  if (!available("go")) {
-    record(`${module.id}: toolchain`, "fail", "go is not on PATH; install Go or remove the module");
+  const wrongVersion = spec.tool !== undefined && !flags["dry-run"] && spec.tool in pinnedTools() ? versionProblem(spec.tool, installedVersion(spec.tool, tools), tools) : null;
+  if (wrongVersion) {
+    record(name, "fail", wrongVersion);
     return;
   }
-  const fmt = run("gofmt", ["-l", "."], { cwd, capture: true });
-  const unformatted = fmt.stdout.trim().split(/\r?\n/).filter(Boolean);
-  record(`${module.id}: gofmt`, fmt.status === 0 && unformatted.length === 0 ? "pass" : "fail", unformatted.join(", "));
-  step(`${module.id}: go mod tidy -diff`, "go", ["mod", "tidy", "-diff"], cwd);
-  step(`${module.id}: go vet`, "go", ["vet", "./..."], cwd);
-  // The race detector needs cgo and a C compiler. Where they are missing, the tests still run without
-  // it and the gap is named, as golangci-lint's is: the go-service CI job always runs with -race.
-  const cc = run("go", ["env", "CC"], { cwd, capture: true }).stdout.trim() || "gcc";
-  const race = run("go", ["env", "CGO_ENABLED"], { cwd, capture: true }).stdout.trim() === "1" && available(cc, ["--version"]);
-  if (race) {
-    step(`${module.id}: go test -race`, "go", ["test", "-race", "./..."], cwd);
-  } else {
-    step(`${module.id}: go test`, "go", ["test", "./..."], cwd);
-    record(`${module.id}: go test -race`, "skipped", "needs cgo and a C compiler; the go-service CI job runs it");
+  if (spec.expect === "no-output" && !flags["dry-run"]) {
+    // A command that reports findings on stdout and still exits 0, such as gofmt -l.
+    const [command, ...args] = spec.run;
+    const out = run(command, args, { cwd, capture: true });
+    const findings = out.stdout.trim().split(/\r?\n/).filter(Boolean);
+    record(name, out.status === 0 && findings.length === 0 ? "pass" : "fail", findings.join(", "));
+    return;
   }
-  if (available("golangci-lint")) step(`${module.id}: golangci-lint`, "golangci-lint", ["run"], cwd);
-  else record(`${module.id}: golangci-lint`, "skipped", "not on PATH; the go-service CI job runs it");
+  step(name, spec.run, cwd);
 }
 
-const requested = process.argv.slice(2);
-const unknown = requested.filter((id) => !MODULES.some((m) => m.id === id));
-if (unknown.length > 0) {
-  console.error(`verify: unknown module(s) ${unknown.join(", ")}. Known: ${MODULES.map((m) => m.id).join(", ")}.`);
+function verifyModule(module) {
+  const cwd = join(ROOT, module.dir);
+  const toolchain = TOOLCHAINS[module.toolchain];
+  if (!flags["dry-run"]) {
+    if (!available(toolchain.command, toolchain.probe)) {
+      record(`${module.id}: toolchain`, "fail", `${toolchain.command} is not on PATH; install it or remove the module`);
+      return;
+    }
+    if (toolchain.installed && !existsSync(join(cwd, toolchain.installed))) {
+      record(`${module.id}: dependencies`, "fail", "not installed; run node scripts/setup.mjs");
+      return;
+    }
+  }
+  for (const spec of module.checks) check(module, cwd, spec);
+  // A task service is held to the one contract all of them share (ADR-0008), and a module that repeats
+  // facts without serving them to the files that state them (ADR-0010).
+  if (module.taskApi) step(`${module.id}: contract`, ["node", "scripts/check-contract.mjs", module.id]);
+  if (module.facts) step(`${module.id}: facts`, ["node", "scripts/check-facts.mjs", module.id]);
+  // A client of the task API is driven against a real one, where a service is present to run it against.
+  const partner = module.e2e ? e2ePartner(module, present) : null;
+  if (partner) step(`${module.id}: end to end with ${partner.id}`, ["node", "scripts/check-contract.mjs", "--e2e", module.id, "--service", partner.id]);
+}
+
+let present;
+try {
+  present = presentModules();
+} catch (err) {
+  if (!(err instanceof ModuleError)) throw err;
+  console.error(`verify: ${err.message}`);
   process.exit(2);
 }
-
-const present = presentModules();
 const absent = requested.filter((id) => !present.some((m) => m.id === id));
 if (absent.length > 0) {
   // Naming a module that is not here must not print OK after checking only the chassis.
-  console.error(`verify: module(s) ${absent.join(", ")} are not present in this repository.`);
+  console.error(`verify: no module named ${absent.join(", ")} here. Present: ${present.map((m) => m.id).join(", ") || "none"}.`);
   process.exit(2);
 }
 
-chassis();
-for (const module of present) {
-  if (requested.length > 0 && !requested.includes(module.id)) continue;
-  if (module.toolchain === "go") goModule(module);
-  else if (module.toolchain === "python") pythonModule(module);
-  else nodeModule(module);
-  // ultra:begin go-service|ts-service|py-service
-  // Each task service is also held to the one contract all of them share (ADR-0008).
-  if (TASK_SERVICES.includes(module.id)) step(`${module.id}: contract`, "node", ["scripts/check-contract.mjs", module.id]);
-  // ultra:end go-service|ts-service|py-service
-  // ultra:begin mcp-server|web|ts-library
-  // A module that repeats the task rules without serving them is held to their one statement (ADR-0010).
-  if (RULE_MODULES.includes(module.id)) step(`${module.id}: task rules`, "node", ["scripts/check-rules.mjs", module.id]);
-  // ultra:end mcp-server|web|ts-library
+if (!flags["no-chassis"]) chassis();
+for (const module of flags["no-modules"] ? [] : present) {
+  if (requested.length === 0 || requested.includes(module.id)) verifyModule(module);
 }
 
+if (flags["dry-run"]) process.exit(0);
 const icon = { pass: "✔", fail: "✘", skipped: "–" };
 console.log("\nverify summary");
 for (const { name, status, note } of results) console.log(`  ${icon[status]} ${name}${note ? `  (${note})` : ""}`);

@@ -15,6 +15,19 @@ npm start          # serves over stdio; the task API must be running
 
 Register it with a client — for Claude Code, `claude mcp add tasks -- node /absolute/path/to/services/mcp-server/src/main.ts`, or the equivalent entry in another client's configuration:
 
+<!-- generated:fill
+```json
+{
+  "mcpServers": {
+    "tasks": {
+      "command": "node",
+      "args": ["/absolute/path/to/services/mcp-server/src/main.ts"],
+      "env": { "TASK_API_URL": "http://localhost:{{contract config.PORT.default.value}}" }
+    }
+  }
+}
+```
+-->
 ```json
 {
   "mcpServers": {
@@ -26,11 +39,14 @@ Register it with a client — for Claude Code, `claude mcp add tasks -- node /ab
   }
 }
 ```
+<!-- /generated -->
 
+<!-- generated:env-table services/mcp-server/server.json -->
 | Variable | Default | Meaning |
 |---|---|---|
-| `TASK_API_URL` | `http://localhost:8080` | Where the task API is. Must be an absolute http or https URL |
-| `TASK_API_TIMEOUT_MS` | `10000` | How long one API call may take before it is abandoned |
+| `TASK_API_URL` | `http://localhost:8080` | Where the task API is: an absolute http or https URL. |
+| `TASK_API_TIMEOUT_MS` | `10000` | How long one call to the task API may take, in milliseconds. |
+<!-- /generated -->
 
 A value it cannot use stops the process at startup. A server that starts and then fails every tool call is worse than one that never started: the model keeps trying.
 
@@ -57,6 +73,22 @@ npm run verify    # import boundaries, type-check, tests
 
 The tests drive the server through a real MCP client over an in-memory transport pair, so a tool that is registered but unreachable — a bad schema, a handler that throws — fails here rather than in someone's editor.
 
+The tool descriptions state the rules from the domain's own table, which `scripts/check-facts.mjs` holds to `scripts/rules/task-rules.json`, so a model never reads a move the API refuses. `scripts/drive.ts` drives the server over stdio with the SDK's client where the tests cannot reach:
+
+<!-- generated:fill
+```bash
+npm run e2e -- http://localhost:{{contract config.PORT.default.value}}                        # every tool against a running task API
+npm run probe -- 1.2.0 -- docker run --rm -i mcp-server     # the image reports 1.2.0 and speaks the SDK's newest protocol
+```
+-->
+```bash
+npm run e2e -- http://localhost:8080                        # every tool against a running task API
+npm run probe -- 1.2.0 -- docker run --rm -i mcp-server     # the image reports 1.2.0 and speaks the SDK's newest protocol
+```
+<!-- /generated -->
+
+`node scripts/verify.mjs` runs the first against a task service of this project whenever one is present, and CI runs the second against the image it builds. The image reports the release it was built as (`--build-arg VERSION=…`, which `mcp-publish.yml` passes); a build without one reports `0.0.0-dev`, so it cannot be taken for a release.
+
 ## Publish
 
 `.github/workflows/mcp-publish.yml` publishes the image to GitHub Container Registry and `server.json` to the [MCP Registry](https://registry.modelcontextprotocol.io), where clients discover servers. It uses no stored token: the image is pushed with the run's `GITHUB_TOKEN`, and the registry trusts GitHub's OIDC identity for the `io.github.<owner>/` namespace. The image is built for `linux/amd64` and `linux/arm64`, each on a native runner, and published as one tag, so it runs natively on an Apple Silicon Mac. The two builds also stay in the registry as `<version>-amd64` and `<version>-arm64`. In a private repository the arm64 runner uses paid Actions minutes once the free allowance is spent.
@@ -74,9 +106,16 @@ It runs after each release that creates a version tag, and on demand with a vers
 
 ## Container
 
+<!-- generated:fill
+```bash
+docker build --tag mcp-server .
+docker run --rm -i --env TASK_API_URL=http://host.docker.internal:{{contract config.PORT.default.value}} mcp-server
+```
+-->
 ```bash
 docker build --tag mcp-server .
 docker run --rm -i --env TASK_API_URL=http://host.docker.internal:8080 mcp-server
 ```
+<!-- /generated -->
 
 `-i` matters: the protocol is stdin and stdout.

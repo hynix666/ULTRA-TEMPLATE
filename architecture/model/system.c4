@@ -28,7 +28,7 @@ model {
 
     // ultra:begin ts-service
     apiTs = service 'api-ts' {
-      technology 'TypeScript, Node 24'
+      technology 'TypeScript, Node'
       description 'Task HTTP API with a pure domain core; import boundaries checked on every file.'
       link ../../services/api-ts/README.md 'README'
     }
@@ -37,7 +37,7 @@ model {
 
     // ultra:begin py-service
     apiPy = service 'api-py' {
-      technology 'Python 3.13, WSGI'
+      technology 'Python, WSGI'
       description 'Task HTTP API on the standard library; layer rules enforced by an ast-based check.'
       link ../../services/api-py/README.md 'README'
     }
@@ -52,5 +52,33 @@ model {
     }
     user -> mcpServer 'asks an assistant to manage tasks, which calls its tools'
     // ultra:end mcp-server
+
+    // ultra:begin ts-library
+    tsLibrary = library 'ts-library' {
+      technology 'TypeScript, npm'
+      description 'The task status rules as a typed package on npm, for a client that should offer only the moves the API accepts.'
+      link ../../packages/ts-library/README.md 'README'
+    }
+    // ultra:end ts-library
+
+    // The clients of the task API, each drawn only when both ends are in the project.
+    // ultra:begin mcp-server&go-service
+    mcpServer -> apiGo 'calls /api/tasks for its tools'
+    // ultra:end mcp-server&go-service
+    // ultra:begin mcp-server&ts-service
+    mcpServer -> apiTs 'calls /api/tasks for its tools'
+    // ultra:end mcp-server&ts-service
+    // ultra:begin mcp-server&py-service
+    mcpServer -> apiPy 'calls /api/tasks for its tools'
+    // ultra:end mcp-server&py-service
+    // ultra:begin web&go-service
+    web -> apiGo 'proxies /api/tasks to it'
+    // ultra:end web&go-service
+    // ultra:begin web&ts-service
+    web -> apiTs 'proxies /api/tasks to it'
+    // ultra:end web&ts-service
+    // ultra:begin web&py-service
+    web -> apiPy 'proxies /api/tasks to it'
+    // ultra:end web&py-service
   }
 }

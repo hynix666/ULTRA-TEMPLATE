@@ -11,21 +11,26 @@ import { auditLedger, claims } from "../test/claims.mjs";
 const LEDGER = {
   "One gate.": { rules: [9], paths: ["scripts/verify.mjs", ".github/workflows/verify.yml"] },
   "A pinned supply chain the build enforces.": {
-    rules: [8, 14, 15],
-    paths: ["scripts/check-pins.mjs", ".github/workflows/pins.yml", ".github/workflows/mcp-publish.yml"],
+    rules: [8, 14, 15, 16, 17],
+    paths: ["scripts/tools/tools.json", "scripts/tools.mjs", "scripts/check-pins.mjs", ".github/workflows/pins.yml", ".github/workflows/mcp-publish.yml"],
   },
   "Repository hygiene checks.": { rules: [1, 2, 3, 4, 5, 6, 7, 9, 10, 11, 12, 13] },
   "Clean Architecture services whose layer rules are tests": {
     paths: [
       "services/api-go/internal/architecture_test.go",
+      "services/api-go/internal/effects_test.go",
       "services/api-ts/scripts/check-boundaries.mjs",
+      "services/mcp-server/scripts/check-boundaries.mjs",
+      "services/api-go/internal/repo/repotest/repotest.go",
+      "services/api-ts/test/task-repository-conformance.ts",
+      "services/api-py/tests/task_repository_conformance.py",
       "services/api-py/scripts/check_boundaries.py",
       "scripts/check-contract.mjs",
       "scripts/contract/tasks-api.json",
       "scripts/contract/openapi.json",
     ],
   },
-  "One statement of the rules.": { paths: ["scripts/rules/task-rules.json", "scripts/check-rules.mjs", "test/check-rules.test.mjs"] },
+  "One statement of the rules.": { paths: ["scripts/rules/task-rules.json", "scripts/check-facts.mjs", "test/check-facts.test.mjs"] },
   "A feature-sliced web app and a publishable library": {
     paths: ["apps/web/scripts/check-boundaries.mjs", "packages/ts-library/scripts/check-install.mjs"],
   },
@@ -36,7 +41,17 @@ const LEDGER = {
     paths: [".github/workflows/template-test.yml", "template/init.test.mjs", "template/template-update.test.mjs"],
   },
   "The same checks everywhere.": {
-    paths: ["services/api-ts/biome.jsonc", "scripts/modules.mjs", "scripts/coverage-summary.mjs", ".github/workflows/verify.yml"],
+    paths: [
+      "biome.jsonc",
+      "scripts/modules.mjs",
+      "scripts/verify.mjs",
+      "scripts/tools.mjs",
+      ".github/actions/module/action.yml",
+      "scripts/agent-env.mjs",
+      ".claude/settings.json",
+      "scripts/coverage-summary.mjs",
+      ".github/workflows/verify.yml",
+    ],
   },
 };
 

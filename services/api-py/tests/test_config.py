@@ -50,3 +50,31 @@ def test_a_bad_value_names_the_variable_and_what_was_given() -> None:
         load_config({"PORT": "banana"})
     with pytest.raises(ConfigError, match=r"SHUTDOWN_TIMEOUT must be a positive duration"):
         load_config({"SHUTDOWN_TIMEOUT": "nope"})
+
+
+# Where each script's digits start, so the look-alike values are built rather than written invisibly.
+FULLWIDTH_ZERO = 0xFF10
+ARABIC_INDIC_ZERO = 0x0660
+
+
+def in_digits(text: str, zero: int) -> str:
+    """text with its ASCII digits written in the script whose zero is at code point `zero`."""
+    return "".join(chr(zero + int(c)) if "0" <= c <= "9" else c for c in text)
+
+
+def test_only_ascii_digits_are_digits_as_go_reads_them() -> None:
+    # Python's \d, int() and float() take any script's digits, and $ matches before a final newline;
+    # Go's strconv.Atoi and time.ParseDuration take 0-9 and nothing after the value.
+    for bad in [in_digits("8080", FULLWIDTH_ZERO), in_digits("8080", ARABIC_INDIC_ZERO), "8080\n"]:
+        with pytest.raises(ConfigError):
+            load_config({"PORT": bad})
+    for bad in [in_digits("10s", FULLWIDTH_ZERO), "1" + in_digits("0s", ARABIC_INDIC_ZERO), "10s\n"]:
+        with pytest.raises(ConfigError):
+            load_config({"SHUTDOWN_TIMEOUT": bad})
+
+
+def test_a_timeout_longer_than_go_can_hold_is_refused() -> None:
+    # Go's time.Duration is an int64 of nanoseconds, so api-go refuses anything past about 292 years.
+    assert load_config({"SHUTDOWN_TIMEOUT": "2562047h"}).shutdown_timeout_ms == 2562047 * 3_600_000
+    with pytest.raises(ConfigError):
+        load_config({"SHUTDOWN_TIMEOUT": "2562048h"})

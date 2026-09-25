@@ -6,7 +6,7 @@ Everything in `template/` is deleted when a project is initialized. This file is
 
 GitHub's *Use this template* copies every file and accepts no parameters, so feature selection has to happen after the copy. It cannot run as a GitHub Actions job in the new repository: a push made with `GITHUB_TOKEN` may not create, change or delete anything under `.github/workflows/`, and initialization does all three. So `template/init.mjs` runs once, on the developer's machine, and the result is committed as one reviewable change.
 
-It has no dependencies beyond Node 24, validates every argument before touching a file, builds the whole result in memory before writing any of it, and refuses to run in place on a dirty working tree, so `git checkout -- . && git clean -fd` always undoes it.
+It has no dependencies beyond Node <!-- generated:version .node-version -->24<!-- /generated -->, validates every argument before touching a file, builds the whole result in memory before writing any of it, and refuses to run in place on a dirty working tree, so `git checkout -- . && git clean -fd` always undoes it.
 
 ## The three mechanisms
 
@@ -26,6 +26,8 @@ Several features may own the same path, which then belongs to any of them and is
 
 **Any of several features.** An id may join features with `|` — `FEATURE-A|FEATURE-B` — for content that belongs to a project with any one of them. The end marker names the same ids in the same order, so a half-edited pair is an error rather than a guess, and `template` cannot be joined to a feature. `AGENTS.md`'s paragraph on the task API contract is written this way: it belongs to a project with a Go, TypeScript or Python service, and to no other.
 
+**All of several features.** An id may instead join features with `&` — `FEATURE-A&FEATURE-B` — for content that needs every one of them, such as a relation between two modules. The architecture model draws the MCP server's and the web app's calls to each task service this way, so a project keeps the arrow only when it keeps both ends. One id cannot mix `|` and `&`; content that needs a mix is two blocks.
+
 Strict JSON has no comments, so JSON files carry no markers; a feature that needs a JSON file owns the whole file as a path. Content that should appear only when two features are *both* selected cannot be expressed, and is avoided by design (the architecture model links each service to the user rather than to the web app).
 
 A marker is a whole line, and in Markdown it is an HTML comment, which ends a table and splits a paragraph. So a block is whole lines that already stand alone — a paragraph, a list item, a fenced block — never a row of a table or a sentence inside a paragraph. A path, not a marker, is how a whole file is made conditional.
@@ -36,12 +38,12 @@ The three are not interchangeable, and the public contract says where each one l
 
 ## Adding a feature
 
-1. Create the module directory, self-contained: its own manifest and lockfile, tests, a `verify` script (or the Go toolchain's checks), and a README. A Node module also carries a `biome.jsonc` copied from another one, runs `npm run lint` first in `verify`, and has a `coverage` script that writes `coverage/lcov.info`.
-2. Add the feature to `features.json` with the paths it owns, and to the presets it belongs in.
-3. If `setup` and `verify` must run it, add it to `scripts/modules.mjs`. The template tests fail if a module there is not owned by exactly one feature.
-4. In `.github/workflows/verify.yml`, add its job inside a marker block, named after the feature id, with a *Coverage (report-only, never a gate)* step like its neighbours', and list the job under `verify.needs` inside another. `check-hygiene` fails if the job is missing, is named otherwise, or is left out of the gate. If it needs a toolchain no other feature installs, add the setup step to `copilot-setup-steps.yml` inside a marker block, and to the preset job in `template-test.yml`, gated on a new output of its *Toolchains this preset needs* step. That step reads each preset's features from `features.json`, so a preset gains or loses the toolchain without an edit to the workflow.
-5. Add its Dependabot entries, and its lines in `README.md`, `AGENTS.md` and wherever else it belongs, each inside markers. `check-hygiene` fails if its Dependabot entry is missing. A new task service also joins `TASK_SERVICES` in `scripts/check-contract.mjs`, with the command that starts it, and must pass every case in `scripts/contract/tasks-api.json`, request ids and log lines included. A module that repeats the task rules without serving them joins `RULE_MODULES` in `scripts/check-rules.mjs` and prints its table from a `rules` script. Either way it owns `scripts/rules` in `features.json`, beside the others that do.
-6. Verify, as described below. Add a preset to the matrix in `template-test.yml` if you created one.
+1. **Create the module directory, self-contained:** its toolchain's manifest and lockfile, tests, a README, and a `module.json` saying what it is: its id (the feature's), its toolchain, the checks `verify` runs, and, where they apply, `coverage`, `taskApi`, `facts`, `e2e` and `image` ([ADR-0014](../docs/adr/0014-modules-describe-themselves.md)). `scripts/modules.mjs` finds the module by that file, and setup, verify, the contract, the facts check and CI all read it; `check-hygiene` fails a malformed one. A Node module's `biome.jsonc` extends the root one, its checks start with `npm run lint`, and its coverage writes `coverage/lcov.info`.
+2. **Add the feature to `features.json`** with the paths it owns, and to the presets it belongs in. The template tests fail if a module is not owned by exactly one feature.
+3. **Add its job to `.github/workflows/verify.yml`,** named after its id — a checkout, then `.github/actions/module` with that id — inside a marker block, and list it under `verify.needs` inside another. `check-hygiene` fails if the job is missing, named otherwise, or left out of the gate. The action reads the module's toolchain from its `module.json`, so no other workflow needs an edit, `template-test.yml` and `copilot-setup-steps.yml` included.
+4. **Add its lines elsewhere,** each inside markers: its Dependabot entries, its lines in `README.md` and `AGENTS.md`, and its element in the architecture model, linking its README, with a relation to another module in an `a&b` block. `check-hygiene` fails if its Dependabot entry is missing, and `check-architecture` if its element is. A task service says how it starts under `taskApi` and must pass the contract, configuration cases included; a module that repeats a fact lists it under `facts` and prints it from a `facts` script; a client of the task API can declare an `e2e` check. Any of them owns `scripts/rules` in `features.json`, and `scripts/contract` too if it serves or calls the task API.
+5. **Where its README restates a fact** — a port, a limit, a version — write a generated block instead of the value (`scripts/generate-docs.mjs`).
+6. **Verify,** as described below. A new preset needs no workflow edit: `template-test.yml` reads the presets from `features.json`.
 
 ## Verifying a change to the template
 
@@ -86,8 +88,8 @@ Before merging a release pull request:
 3. **Nothing of the template survives initialization.** Checked in every preset by `check-hygiene` (no marker lines) and by the `template-test` step that fails if `template/` remains.
 4. **The README's steps still work.** If the release changes anything *Start a project* or *Getting started* describes, follow those steps once from a fresh clone.
 5. **`configure-github.mjs` does what its header says.** If the release touches it, run `--dry-run` against a scratch repository and read the requests, then apply them there.
-6. **Manual pins are current.** [docs/toolchain-updates.md](../docs/toolchain-updates.md) lists the versions Dependabot cannot update; check each one at every minor release.
-7. **The notes will read right.** `node template/release-notes.mjs --to v<version>` prints them locally. If a change needs explaining beyond a file list — a behaviour change, a manual step — say so in the pull request description, which the notes link.
+6. **Manual pins are current.** `pins.yml` lists every tool pinned by hand beside its latest release; move one with `node scripts/tools.mjs bump`, as [docs/toolchain-updates.md](../docs/toolchain-updates.md) describes, at every minor release.
+7. **The notes will read right.** A minor or major release carries `template/notes/v<version>.md`, which the notes put first: every check that can now turn an adopter's build red, and every file an update is likely to conflict on and why. A template test fails such a version without it. `node template/release-notes.mjs --to v<version>` prints the notes locally.
 
 After it merges, read the published release once. An `Updated to` or `Initialized from` line in a project is only as useful as the notes it points at.
 

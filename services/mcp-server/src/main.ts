@@ -8,12 +8,14 @@
 import { serveStdio } from "@modelcontextprotocol/server/stdio";
 import { createHttpTaskGateway } from "./adapters/http-task-gateway.ts";
 import { createServer } from "./adapters/mcp.ts";
-import { type Config, ConfigError, loadConfig } from "./config.ts";
+import { type Config, ConfigError, loadConfig, loadVersion } from "./config.ts";
 
 function run(): number {
   let config: Config;
+  let version: string;
   try {
     config = loadConfig(process.env);
+    version = loadVersion(process.env);
   } catch (err) {
     if (!(err instanceof ConfigError)) throw err;
     console.error(`mcp-server: ${err.message}`);
@@ -21,8 +23,8 @@ function run(): number {
   }
 
   const gateway = createHttpTaskGateway({ baseUrl: config.apiBaseUrl, timeoutMs: config.requestTimeoutMs });
-  const handle = serveStdio(() => createServer(gateway));
-  console.error(`mcp-server: serving tasks from ${config.apiBaseUrl} over stdio`);
+  const handle = serveStdio(() => createServer(gateway, { version }));
+  console.error(`mcp-server ${version}: serving tasks from ${config.apiBaseUrl} over stdio`);
 
   const stop = async () => {
     await handle.close();

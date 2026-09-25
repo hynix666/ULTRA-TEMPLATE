@@ -16,7 +16,7 @@ npm run verify   # typecheck, tests, build, and the package checks below
 ```
 
 - **`tsc`** type-checks sources and tests.
-- **Tests** run the TypeScript sources directly under Node 24.
+- **Tests** run the TypeScript sources directly under Node, which strips the types.
 - **`npm run build`** emits `dist/` from `src/` only, with `isolatedDeclarations`: every export states its type, so declarations never depend on inference.
 - **`publint --strict`** checks the package's `exports`, `files` and entry points.
 - **`attw --pack`** checks, against the tarball `npm pack` would publish, that the types resolve the way TypeScript consumers will resolve them.

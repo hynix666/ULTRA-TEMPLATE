@@ -8,8 +8,12 @@ COPY package.json package-lock.json ./
 # with Node carries its own dependencies, with vulnerabilities of their own.
 RUN npm ci --omit=dev --ignore-scripts \
     && rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx
-# Node 24 runs TypeScript directly by stripping types, so the sources ship as they are.
+# Node runs TypeScript directly by stripping types, so the sources ship as they are.
 COPY src ./src
+# The release this image is: mcp-publish.yml passes the tag's version. A build without one reports the
+# development version (src/config.ts), so it cannot be taken for a release.
+ARG VERSION
+ENV MCP_SERVER_VERSION=$VERSION
 USER node
 # The MCP Registry verifies that whoever publishes server.json owns this image by reading this label;
 # it must equal "name" in server.json exactly. The source label links the image to the repository.
