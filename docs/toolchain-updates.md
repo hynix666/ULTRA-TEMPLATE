@@ -33,7 +33,7 @@ Dependabot cannot see a tool a workflow downloads by version, so each is pinned 
 | Tool | Version | Needed | Checksum |
 |---|---|---|---|
 | [actionlint](https://github.com/rhysd/actionlint/releases) | 1.7.12 | everywhere | the release's checksum file |
-| [shellcheck](https://github.com/koalaman/shellcheck/releases) | 0.11.0 | in CI only | the digest GitHub records for each asset |
+| [shellcheck](https://github.com/koalaman/shellcheck/releases) | 0.11.0 | everywhere | the digest GitHub records for each asset |
 | [zizmor](https://github.com/zizmorcore/zizmor/releases) | 1.30.1 | everywhere | the digest GitHub records for each asset |
 | [golangci-lint](https://github.com/golangci/golangci-lint/releases) | 2.13.2 | with a Go module | the release's checksum file |
 | [uv](https://github.com/astral-sh/uv/releases) | 0.12.18 | with a Python module | the `.sha256` file beside each asset |

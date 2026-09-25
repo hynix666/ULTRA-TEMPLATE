@@ -61,6 +61,11 @@ export function validateTools(tools) {
     if ("uses" in tool && (!("check" in tool) || !Array.isArray(tool.uses) || tool.uses.length === 0 || !tool.uses.every((c) => typeof c === "string" && /^[\w.-]+$/.test(c)))) {
       say("`uses` lists the commands a tool's `check` runs when they are on PATH and quietly goes without otherwise");
     }
+    // A helper pinned here is installed with the tool that uses it, so it must be installable everywhere that tool is.
+    for (const helper of Array.isArray(tool.uses) ? tool.uses.filter((h) => h in tools) : []) {
+      const covered = Object.keys(tool.platforms ?? {}).every((key) => key in (tools[helper].platforms ?? {}));
+      if (tools[helper].for !== tool.for || !covered) say(`\`uses\` ${helper}, which this manifest pins, so it needs \`for\` "${tool.for}" and an asset for every platform ${name} has`);
+    }
     for (const [feature, option] of Object.entries(tool.devcontainer ?? {})) {
       if (typeof option !== "string" || option === "") say(`\`devcontainer.${feature}\` names the Dev Container feature option that sets this tool's version`);
     }
@@ -106,7 +111,8 @@ export async function install(name, { tools = loadTools(), dir, fetch = globalTh
   try {
     const archive = join(work, basename(new URL(url).pathname));
     writeFileSync(archive, bytes);
-    const unpacked = spawnSync("tar", ["-xzf", archive, "-C", work], { encoding: "utf8" });
+    // tar reads the compression from the archive itself: gzip for most releases, xz for shellcheck's.
+    const unpacked = spawnSync("tar", ["-xf", archive, "-C", work], { encoding: "utf8" });
     if (unpacked.status !== 0) throw new ToolError(`${name}: could not unpack ${basename(archive)}: ${unpacked.stderr || unpacked.error}`);
     mkdirSync(dir, { recursive: true });
     return asset.files.map((member) => {
@@ -129,15 +135,27 @@ export function command(name, args = [], tools = loadTools()) {
   return [...tool.run.map((part) => fill(part, tool)), ...args];
 }
 
-/** The version a tool on PATH reports, or null when it is not on PATH. Reads the first X.Y.Z it prints. */
+const onPath = (command) => spawnSync(command, ["--version"], { stdio: "ignore" }).status === 0;
+
 /**
- * The commands a tool's check would run but cannot find. Such a check still passes without them, having
- * checked less, so verify names each one as a skip rather than letting the pass stand for the whole check.
+ * What keeps each command a tool's check `uses` from being the one CI runs: it is not on PATH, or this
+ * manifest pins it too and it is another version. Such a check still passes, having checked less or by
+ * other rules, so verify names each one rather than letting the pass stand for the whole check.
  */
-export function missingHelpers(tool, has = (command) => spawnSync(command, ["--version"], { stdio: "ignore" }).status === 0) {
-  return (tool.uses ?? []).filter((command) => !has(command));
+export function helperProblems(tool, { tools = loadTools(), found = (name) => installedVersion(name, tools), has = onPath } = {}) {
+  return (tool.uses ?? []).flatMap((helper) => {
+    if (!(helper in tools)) return has(helper) ? [] : [{ helper, missing: true }];
+    const version = found(helper);
+    if (version === null) return [{ helper, missing: true }];
+    const wrong = versionProblem(helper, version, tools);
+    return wrong ? [{ helper, wrong }] : [];
+  });
 }
 
+/** `names`, each followed by the commands its check `uses` that this manifest pins: a tool is installed with what CI runs it with. */
+export const withHelpers = (names, tools = loadTools()) => [...new Set(names.flatMap((name) => [name, ...(tools[name]?.uses ?? []).filter((helper) => helper in tools)]))];
+
+/** The version a tool on PATH reports, or null when it is not on PATH. Reads the first X.Y.Z it prints. */
 export function installedVersion(name, tools = loadTools()) {
   const tool = need(tools, name);
   if (!tool.versionCommand) return null;
@@ -274,7 +292,10 @@ async function main(argv) {
     const forAt = rest.indexOf("--for");
     const dir = dirAt === -1 ? defaultDir() : resolve(rest[dirAt + 1]);
     const valueAt = new Set([dirAt, forAt].filter((at) => at !== -1).map((at) => at + 1));
-    let names = rest.filter((arg, i) => !arg.startsWith("--") && !valueAt.has(i));
+    let names = withHelpers(
+      rest.filter((arg, i) => !arg.startsWith("--") && !valueAt.has(i)),
+      tools,
+    );
     const toolchains = forAt === -1 ? null : (rest[forAt + 1] ?? "").split(",").filter(Boolean);
     if (toolchains) names = [...names, ...toolsFor(toolchains, tools)];
     const local = rest.includes("--local");
@@ -285,7 +306,7 @@ async function main(argv) {
       names = [...names, ...plan.install];
     }
     if (names.length === 0 && !local && !toolchains) throw new ToolError("name a tool to install, or pass --local or --for");
-    for (const name of names) {
+    for (const name of new Set(names)) {
       for (const path of await install(name, { tools, dir })) console.log(`tools: installed ${name} ${tools[name].version} at ${path}`);
     }
     if (process.env.GITHUB_PATH) appendFileSync(process.env.GITHUB_PATH, `${dir}\n`);

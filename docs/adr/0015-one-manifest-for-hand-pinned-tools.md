@@ -13,9 +13,9 @@ Every hand-pinned tool is declared once, in `scripts/tools/tools.json`: its vers
 - Hygiene rule 16 fails a version written into a workflow or action instead.
 - Hygiene rule 17 holds each toolchain version's copies to its declaration, and the Dev Container's golangci-lint and uv to the manifest.
 - `verify` fails when a tool on PATH is not the pinned version, and names the command that installs it.
-- A tool whose check runs another command only when it is on PATH lists it under `uses`, and `verify` reports each one missing as a skip, which fails in CI. actionlint checks each `run:` script with shellcheck this way; a runner that had shellcheck turned a workflow red that `verify` had passed on a machine without it.
+- A tool whose check runs another command only when it is on PATH lists it under `uses`. `verify` reports each one missing as a skip, which fails in CI, and fails one pinned here at another version; installing the tool installs the ones pinned here with it. actionlint checks each `run:` script with shellcheck this way. A runner's own shellcheck turned a workflow red that `verify` had passed on a machine without one, so shellcheck is pinned too, and CI, local runs and an agent's session lint the workflows with the same one.
 
-shellcheck itself is not pinned yet: CI uses the one GitHub's runners carry, and a pin needs the digest GitHub records for each asset, which could not be read from where this was written. zizmor's arm64 and macOS assets are not pinned for the same reason: its release publishes no checksum file, and GitHub's recorded digest could not be read from where this was written. `install --local` reports that and installs the rest.
+zizmor's arm64 and macOS assets are not pinned: its release publishes no checksum file, and GitHub's recorded digest could not be read from where this was written. `install --local` reports that and installs the rest.
 
 ## Alternatives considered
 

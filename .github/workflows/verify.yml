@@ -99,14 +99,6 @@ jobs:
         with:
           names: actionlint
       - run: actionlint -color
-      # Temporary: the SHA-256 GitHub records for each shellcheck asset, which the session writing the
-      # pin cannot reach. Removed in the commit that writes the digests this prints.
-      - name: shellcheck's digests, as GitHub records them
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          node scripts/tools.mjs bump shellcheck
-          git diff -- scripts/tools/tools.json
 
   # zizmor audits the workflows for security rather than syntax: template injection, dangerous
   # triggers, persisted credentials, cache poisoning. With a token it also confirms each pinned SHA

@@ -5,18 +5,18 @@ import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { test } from "node:test";
-import { bump, command, install, loadTools, localPlan, localTools, missingHelpers, platform, toolsFor, validateTools } from "../scripts/tools.mjs";
+import { bump, command, helperProblems, install, loadTools, localPlan, localTools, platform, toolsFor, validateTools, withHelpers } from "../scripts/tools.mjs";
 
-/** A tar.gz holding one executable, its bytes, and a fetch that serves it at `url`. */
-function release(t, url, member = "demo") {
+/** A tar.gz (or, with `xz`, a tar.xz) holding one executable, its bytes, and a fetch that serves it at `url`. */
+function release(t, url, member = "demo", { xz = false } = {}) {
   const work = mkdtempSync(join(tmpdir(), "tools-test-"));
   t.after(() => rmSync(work, { recursive: true, force: true }));
-  mkdirSync(join(work, "src"));
+  mkdirSync(dirname(join(work, "src", member)), { recursive: true });
   writeFileSync(join(work, "src", member), "#!/bin/sh\necho demo 1.2.3\n");
-  const archive = join(work, "demo.tar.gz");
-  assert.equal(spawnSync("tar", ["-czf", archive, "-C", join(work, "src"), member]).status, 0);
+  const archive = join(work, xz ? "demo.tar.xz" : "demo.tar.gz");
+  assert.equal(spawnSync("tar", [xz ? "-cJf" : "-czf", archive, "-C", join(work, "src"), member]).status, 0);
   const bytes = readFileSync(archive);
   const fetch = async (address) => (address === url ? new Response(bytes) : new Response("", { status: 404 }));
   return { work, bytes, sha: createHash("sha256").update(bytes).digest("hex"), fetch };
@@ -63,17 +63,45 @@ test("an entry that says nothing about where its checksum comes from, or is both
   assert.match(validateTools({ x: { version: "1.2", for: "moon", releases: {}, run: ["x"] } }).join("\n"), /version` must be X\.Y\.Z.*\n.*`for` must be one of.*\n.*`releases` must name/);
 });
 
-test("a command a check uses only when it is on PATH is named when it is not, so the pass is not read as the whole check", () => {
-  const check = { check: ["demo", "--strict"], uses: ["helper"] };
+test("a command a check uses is named when it is missing, and held to its pin when this manifest pins it", () => {
   const url = "https://example.test/x.tar.gz";
+  const check = { check: ["demo", "--strict"], uses: ["helper"] };
   assert.deepEqual(validateTools(tool(url, "a".repeat(64), check)), []);
-  assert.deepEqual(missingHelpers(check, () => false), ["helper"]);
-  assert.deepEqual(missingHelpers(check, () => true), []);
-  assert.deepEqual(missingHelpers({ check: ["demo"] }, () => false), [], "a check that uses nothing is missing nothing");
+  assert.deepEqual(helperProblems(check, { tools: {}, has: () => false }), [{ helper: "helper", missing: true }]);
+  assert.deepEqual(helperProblems(check, { tools: {}, has: () => true }), []);
+  assert.deepEqual(helperProblems({ check: ["demo"] }, { tools: {}, has: () => false }), [], "a check that uses nothing is missing nothing");
+  const pinned = { helper: { version: "2.0.0", versionCommand: ["helper", "--version"] } };
+  assert.deepEqual(helperProblems(check, { tools: pinned, found: () => null }), [{ helper: "helper", missing: true }]);
+  assert.deepEqual(helperProblems(check, { tools: pinned, found: () => "2.0.0" }), []);
+  assert.match(helperProblems(check, { tools: pinned, found: () => "1.9.0" })[0].wrong, /helper 1\.9\.0 is on PATH, but scripts\/tools\/tools\.json pins 2\.0\.0/);
   for (const uses of [[], ["a helper"], "helper", [""]]) {
     assert.match(validateTools(tool(url, "a".repeat(64), { ...check, uses })).join(), /`uses` lists the commands a tool's `check` runs/, JSON.stringify(uses));
   }
   assert.match(validateTools(tool(url, "a".repeat(64), { uses: ["helper"] })).join(), /`uses` lists/, "a tool with no check uses nothing");
+});
+
+test("a helper this manifest pins is installable wherever the tool that uses it is, and is installed with it", () => {
+  const url = "https://example.test/x.tar.gz";
+  const both = { ...tool(url, "a".repeat(64), { check: ["demo"], uses: ["helper"] }), helper: tool(url, "b".repeat(64)).demo };
+  assert.deepEqual(validateTools(both), []);
+  const needs = /`uses` helper, which this manifest pins, so it needs `for` "chassis" and an asset for every platform demo has/;
+  assert.match(validateTools({ ...both, helper: { ...both.helper, for: "ci" } }).join(), needs);
+  assert.match(validateTools({ ...both, helper: { ...both.helper, platforms: {} } }).join(), needs);
+  assert.deepEqual(withHelpers(["demo"], both), ["demo", "helper"]);
+  assert.deepEqual(withHelpers(["helper", "demo"], both), ["helper", "demo"], "each once");
+  assert.deepEqual(withHelpers(["demo"], { demo: both.demo }), ["demo"], "a helper this manifest does not pin is not installed");
+});
+
+// No tool is installed on a platform the manifest pins no asset for, and there tar may not write xz.
+const installsHere = Object.values(loadTools()).some((entry) => platform() in (entry.platforms ?? {}));
+
+test("an xz archive installs as a gzip one does, from a directory inside it, and is refused when its SHA-256 differs", { skip: !installsHere && `no tool is installed on ${platform()}` }, async (t) => {
+  const url = "https://example.test/v1.2.3/demo.tar.xz";
+  const { work, sha, fetch } = release(t, url, "demo-v1.2.3/demo", { xz: true });
+  const pin = (sha256) => tool("https://example.test/v{version}/demo.tar.xz", sha256, { platforms: { [platform()]: { url: "https://example.test/v{version}/demo.tar.xz", sha256, files: ["demo-v{version}/demo"] } } });
+  assert.deepEqual(await install("demo", { tools: pin(sha), dir: join(work, "bin"), fetch }), [join(work, "bin", "demo")]);
+  await assert.rejects(() => install("demo", { tools: pin("0".repeat(64)), dir: join(work, "other"), fetch }), /not the pinned 0{64}\. The asset was replaced, or the pin is wrong: nothing was unpacked/);
+  assert.equal(existsSync(join(work, "other")), false);
 });
 
 test("a tool run by version is run with the pinned version filled in", () => {
