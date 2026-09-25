@@ -25,6 +25,10 @@
  *      every session that starts, far from the change that broke it.
  *  10. Every generated block in a Markdown file (scripts/generate-docs.mjs) says what its source says
  *      now, and names a source that is here. A value restated by hand is how a README goes stale.
+ *  11. The ADR index's status column says what each record's own status line says, written short —
+ *      "Accepted · Amends [ADR-0006](…)" is "Accepted, amends 0006" — and each number it shows, in a
+ *      row or a status, is the number of the record it links. The record states its status; the
+ *      index's copy goes stale the day a record is amended or superseded, unless it is compared.
  *
  *   node scripts/check-docs.mjs
  *
@@ -32,7 +36,7 @@
  */
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
-import { dirname, isAbsolute, join, relative, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { DocsError, regenerate } from "./generate-docs.mjs";
 
@@ -47,6 +51,59 @@ export const MAX_POINTER_LINES = 20;
 export const WRONG_NAME = "AGENT.MD";
 /** Copilot's own customization surface: task-shaped wrappers, never a second set of rules. */
 export const CLAUDE_SETTINGS = ".claude/settings.json";
+
+/** A record's status: what its `**Status:**` line says before the date, or null when it has none. */
+export function recordStatus(text) {
+  const line = normalize(text)
+    .split("\n")
+    .find((l) => l.startsWith("**Status:**"));
+  return line === undefined ? null : line.slice("**Status:**".length).split(/\s*·\s*\*\*Date:\*\*/)[0].trim();
+}
+
+/**
+ * A record's status as the index writes it: each link to a record as its number, numbers and clauses
+ * separated by commas, and each clause after the first in lower case. "Accepted · Amends [ADR-0005](…)
+ * and [ADR-0008](…)" is "Accepted, amends 0005, 0008".
+ */
+export function indexStatus(status) {
+  return status
+    .replace(/\[ADR-(\d{4})\]\([^)]*\)/g, "$1")
+    .replace(/(\d{4}) and (?=\d{4})/g, "$1, ")
+    .replace(/\s*·\s*/g, ", ")
+    .replace(/, ([A-Z])/g, (_, letter) => `, ${letter.toLowerCase()}`)
+    .trim();
+}
+
+/** Rule 11: every row of the ADR index shows its record's number and the status its record states. */
+function checkAdrIndex(root, tracked, failures) {
+  const indexPath = `${ADR_DIR}/${INDEX}`;
+  if (!tracked.includes(indexPath)) return;
+  const read = (file) => readFileSync(join(root, ADR_DIR, file), "utf8");
+  const number = (file) => /^(\d{4})-/.exec(basename(file))?.[1];
+  for (const line of normalize(read(INDEX)).split("\n")) {
+    const cells = line.trim().startsWith("|") ? line.trim().split(/(?<!\\)\|/).slice(1, -1).map((cell) => cell.trim()) : [];
+    const link = /^\[([^\]]+)\]\(\.?\/?([^)/\s]+\.md)\)$/.exec(cells[0] ?? "");
+    // A row that links nothing beside the index is not a record's; rule 6 names a link that goes nowhere.
+    if (!link || cells.length < 2 || !tracked.includes(`${ADR_DIR}/${link[2]}`)) continue;
+    const [, shown, file] = link;
+    if (shown !== number(file)) {
+      failures.push(`\`${indexPath}\` links \`${file}\` as ${shown}. A record's number is the one its file name starts with.`);
+      continue;
+    }
+    const status = recordStatus(read(file));
+    if (status === null) {
+      failures.push(`\`${ADR_DIR}/${file}\` has no \`**Status:**\` line, so its row in the index states a status nothing records. Copy the line from 0000-template.md.`);
+      continue;
+    }
+    for (const [, cited, target] of status.matchAll(/\[ADR-(\d{4})\]\(([^)]*)\)/g)) {
+      if (number(target) !== cited) failures.push(`\`${ADR_DIR}/${file}\`'s status names ADR-${cited} but links \`${target}\`.`);
+    }
+    const expected = indexStatus(status);
+    if (cells.at(-1) !== expected) {
+      failures.push(`\`${indexPath}\` gives ${shown} the status "${cells.at(-1)}", but its record says "${expected}". The record states it: write the row from there.`);
+    }
+  }
+}
 
 /** Rule 10: every generated block matches its source, which is here. */
 function checkGenerated(root, tracked, failures) {
@@ -102,6 +159,7 @@ export const MAX_SKILL_DESCRIPTION = 1024;
 export const SKILL_NAME = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const DOCS_DIR = "docs";
 const INDEX = "README.md";
+const ADR_DIR = `${DOCS_DIR}/adr`;
 
 const normalize = (text) => text.replace(/\r\n/g, "\n");
 
@@ -309,6 +367,7 @@ export function checkDocs(root = process.cwd()) {
 
   checkVendorFiles(root, tracked, failures);
   checkGenerated(root, tracked, failures);
+  checkAdrIndex(root, tracked, failures);
   if (tracked.includes(CLAUDE_SETTINGS)) {
     try {
       failures.push(...hookProblems(JSON.parse(read(CLAUDE_SETTINGS)), tracked).map((problem) => `\`${CLAUDE_SETTINGS}\` ${problem}.`));

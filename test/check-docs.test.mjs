@@ -6,7 +6,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
-import { checkDocs, frontmatter, hookProblems, IMPORT_TEXT, linksTo, markdownLinks, MAX_POINTER_LINES, MAX_SKILL_DESCRIPTION } from "../scripts/check-docs.mjs";
+import { checkDocs, frontmatter, hookProblems, IMPORT_TEXT, indexStatus, linksTo, markdownLinks, MAX_POINTER_LINES, MAX_SKILL_DESCRIPTION, recordStatus } from "../scripts/check-docs.mjs";
 
 const skill = (name, description = "When to use it.") => `---\nname: ${name}\ndescription: ${description}\n---\n\n# ${name}\n`;
 
@@ -19,7 +19,7 @@ const CLEAN = {
   "docs/README.md": "# Documentation\n\n- [Decisions](adr/README.md)\n- [Runbook](./runbook.md)\n",
   "docs/runbook.md": "# Runbook\n",
   "docs/adr/README.md": "# Decisions\n\n| [0001](0001-first.md) | Accepted |\n",
-  "docs/adr/0001-first.md": "# First\n",
+  "docs/adr/0001-first.md": "# First\n\n**Status:** Accepted · **Date:** 2026-01-01\n",
 };
 
 function fixture(t, changes = {}) {
@@ -94,6 +94,52 @@ test("a document nothing links to fails, at either level", (t) => {
   assert.match(failures(t, { "docs/adr/0002-second.md": "# Second\n" }), /docs\/adr\/README\.md` does not link `0002-second\.md`/);
   assert.match(failures(t, { "docs/README.md": "# Documentation\n\n- [Runbook](runbook.md)\n" }), /does not link `adr\/README\.md`/);
   assert.match(failures(t, { "docs/adr/README.md": null }), /docs\/adr\/` has no README\.md/);
+});
+
+test("the ADR index states each record's status as its record does", (t) => {
+  const record = (status) => `# A decision\n\n**Status:** ${status} · **Date:** 2026-01-01\n`;
+  const index = (...rows) => ["# Decisions", "", "| ADR | Decision | Status |", "|---|---|---|", ...rows, ""].join("\n");
+  const first = "| [0001](0001-first.md) | First | Accepted |";
+  const second = (status, row, link = "[0002](0002-second.md)") => ({
+    "docs/adr/0002-second.md": record(status),
+    "docs/adr/README.md": index(first, `| ${link} | Second | ${row} |`),
+  });
+  // Each way a record writes its status passes when its row says the same in the index's short form.
+  for (const [status, row] of [
+    ["Accepted", "Accepted"],
+    ["Accepted · Amends [ADR-0001](0001-first.md)", "Accepted, amends 0001"],
+    ["Accepted, amends [ADR-0001](0001-first.md)", "Accepted, amends 0001"],
+  ]) {
+    const result = checkDocs(fixture(t, second(status, row)));
+    assert.equal(result.ok, true, `${status}: ${result.failures?.join("\n")}`);
+  }
+  const superseded = {
+    "docs/adr/0001-first.md": record("Superseded by [ADR-0002](0002-second.md)"),
+    "docs/adr/0002-second.md": record("Accepted"),
+    "docs/adr/README.md": index("| [0001](0001-first.md) | First | Superseded by 0002 |", "| [0002](0002-second.md) | Second | Accepted |"),
+  };
+  assert.equal(checkDocs(fixture(t, superseded)).ok, true, "a superseded record's row names what superseded it");
+
+  assert.match(
+    failures(t, second("Accepted, amends [ADR-0001](0001-first.md)", "Accepted")),
+    /`docs\/adr\/README\.md` gives 0002 the status "Accepted", but its record says "Accepted, amends 0001"/,
+  );
+  assert.match(failures(t, { ...superseded, "docs/adr/README.md": index(first, "| [0002](0002-second.md) | Second | Accepted |") }), /gives 0001 the status "Accepted", but its record says "Superseded by 0002"/);
+  assert.match(failures(t, { ...second("Accepted", "Accepted"), "docs/adr/0002-second.md": "# Second\n" }), /`docs\/adr\/0002-second\.md` has no `\*\*Status:\*\*` line/);
+  assert.match(failures(t, second("Accepted", "Accepted", "[0003](0002-second.md)")), /links `0002-second\.md` as 0003/);
+  assert.match(failures(t, second("Accepted · Amends [ADR-0003](0001-first.md)", "Accepted, amends 0003")), /status names ADR-0003 but links `0001-first\.md`/);
+});
+
+test("a record's status is read from its status line and written short, as the index writes it", () => {
+  assert.equal(recordStatus("# T\n\n**Status:** Accepted · **Date:** 2026-01-01\n"), "Accepted");
+  assert.equal(recordStatus("# T\n\n**Status:** Accepted\n"), "Accepted", "a line without a date is the status alone");
+  assert.equal(recordStatus("# T\n\nNo status here.\n"), null);
+  // Every form a record in this repository writes, and the template's.
+  assert.equal(indexStatus("Accepted"), "Accepted");
+  assert.equal(indexStatus("Accepted · Amends [ADR-0006](0006-one-set-of-agent-instructions.md)"), "Accepted, amends 0006");
+  assert.equal(indexStatus("Accepted · Amends [ADR-0005](a.md), [ADR-0007](b.md) and [ADR-0008](c.md)"), "Accepted, amends 0005, 0007, 0008");
+  assert.equal(indexStatus("Accepted, amends [ADR-0004](a.md) and [ADR-0010](b.md)"), "Accepted, amends 0004, 0010");
+  assert.equal(indexStatus("Superseded by [ADR-0017](0017-a.md)"), "Superseded by 0017");
 });
 
 test("a repository with no docs directory is not a failure", (t) => {

@@ -4,6 +4,8 @@ Each record captures one decision that shapes this repository: the context that 
 
 Records are amended, not rewritten. When a decision changes, a new record supersedes the old one and the old one's status points to it, so the reasoning behind every past state stays readable.
 
+A record states its own status, on its `**Status:**` line. The table below repeats it short, each linked record as its number: `Accepted · Amends [ADR-0006](…)` is `Accepted, amends 0006`. `scripts/check-docs.mjs` fails a row that says anything else, so change the record first and then its row.
+
 | ADR | Decision | Status |
 |---|---|---|
 | [0001](0001-record-architecture-decisions.md) | Record architecture decisions | Accepted |

@@ -24,6 +24,7 @@ Every fact that more than one file depends on is declared exactly once. Every ot
 | Limits, configuration, startup and shutdown | `scripts/contract/tasks-api.json` | the contract run and the image probe; `check-facts` for the API's default port |
 | Lint and format settings | the root `biome.jsonc` | derived through `extends` |
 | Values the documentation states | their source files | generated blocks; check-docs rule 10 |
+| Each decision's status | its record's `**Status:**` line | the ADR index's status column; check-docs rule 11 |
 
 `check-rules` becomes `check-facts`, since the facts a module repeats are no longer only the rules. The contract's cases refer to a limit as `{ "ref": "limits.maxBodyBytes", "plus": 1 }` and never restate it; the runner refuses a count written as a number.
 
