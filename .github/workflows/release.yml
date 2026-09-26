@@ -15,8 +15,6 @@ name: release
 on:
   push:
     branches: [main]
-  # Temporary: shows on the pull request that GitHub now starts this workflow. Reverted before merge.
-  pull_request:
 
 permissions:
   contents: read
